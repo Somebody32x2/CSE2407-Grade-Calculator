@@ -250,6 +250,34 @@ async function handleSync(req, res, token, method) {
 
 /* ---------------------------------------------------------------- static --- */
 
+/**
+ * The public sub-path this request arrived under, if any.
+ *
+ * A reverse proxy doing path-based routing strips the prefix before the
+ * request reaches us and reports it in X-Forwarded-Prefix, which is the only
+ * way to know the browser is at /CSE2407 while we see /. BASE_PATH covers the
+ * case where nothing strips it.
+ */
+function publicPrefix(req) {
+  const fwd = req.headers['x-forwarded-prefix'];
+  const raw = (typeof fwd === 'string' && fwd) ? fwd : BASE_PATH;
+  // Only a simple path is allowed through: this ends up in the served HTML.
+  if (!/^\/[A-Za-z0-9._~\-/]*$/.test(raw || '')) return '';
+  return String(raw || '').replace(/\/+$/, '');
+}
+
+/**
+ * Give index.html a <base> so its relative asset URLs resolve under a
+ * sub-path, with or without a trailing slash on the address bar.
+ *
+ * Without this, visiting /CSE2407 (no slash) makes the browser resolve
+ * "js/app.js" against /, and every asset 404s.
+ */
+function withBase(html, prefix) {
+  if (!prefix) return html;
+  return html.replace('<head>', `<head>\n<base href="${prefix}/">`);
+}
+
 function serveStatic(req, res, pathname) {
   const wanted = pathname === '/' ? '/index.html' : pathname;
   if (!STATIC_FILES.has(wanted)) return sendJson(res, 404, { error: 'not found' });
@@ -261,11 +289,15 @@ function serveStatic(req, res, pathname) {
   fs.readFile(filePath, (err, buf) => {
     if (err) return sendJson(res, 404, { error: 'not found' });
     const ext = path.extname(filePath);
-    send(res, 200, buf, {
+    const isIndex = wanted === '/index.html';
+    const body = isIndex ? withBase(buf.toString('utf8'), publicPrefix(req)) : buf;
+    send(res, 200, body, {
       'Content-Type': MIME[ext] || 'application/octet-stream',
-      // index.html carries the asset version query strings, so it must not be
-      // cached; the assets it points at are immutable for a given ?v=.
-      'Cache-Control': wanted === '/index.html' ? 'no-cache' : 'public, max-age=3600',
+      // index.html carries the asset version query strings and a per-request
+      // <base>, so it must not be cached; the assets it points at are
+      // immutable for a given ?v=.
+      'Cache-Control': isIndex ? 'no-cache' : 'public, max-age=3600',
+      Vary: 'X-Forwarded-Prefix',
     });
   });
 }

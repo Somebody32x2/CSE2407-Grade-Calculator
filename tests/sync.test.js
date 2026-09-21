@@ -613,11 +613,17 @@ test('the bookmarklet stays well under the browser URL cap', () => {
 
 const server = require(path.join(root, 'server/server.js'));
 
-function request(method, urlPath, body) {
+function request(method, urlPath, body, extraHeaders) {
   return new Promise((resolve, reject) => {
     const { port } = server.address();
     const req = http.request(
-      { host: '127.0.0.1', port, path: urlPath, method, headers: { 'Content-Type': 'text/plain' } },
+      {
+        host: '127.0.0.1',
+        port,
+        path: urlPath,
+        method,
+        headers: Object.assign({ 'Content-Type': 'text/plain' }, extraHeaders || {}),
+      },
       (res) => {
         let data = '';
         res.on('data', (c) => { data += c; });
@@ -737,6 +743,41 @@ async function relayTests() {
     assert.strictEqual((await request('GET', '/server/server.js')).status, 404);
     assert.strictEqual((await request('GET', '/../package.json')).status, 404);
     assert.strictEqual((await request('GET', '/README.md')).status, 404);
+  });
+
+  check('a proxy-reported sub-path becomes a <base> in the page', async () => {
+    const res = await request('GET', '/', undefined, { 'X-Forwarded-Prefix': '/CSE2407' });
+    assert.strictEqual(res.status, 200);
+    assert.ok(res.body.includes('<base href="/CSE2407/">'), 'base tag injected');
+    assert.ok(res.body.indexOf('<base') < res.body.indexOf('styles.css'),
+      'the base has to precede the first relative URL');
+  });
+
+  check('no sub-path means no <base>', async () => {
+    const res = await request('GET', '/');
+    assert.ok(!res.body.includes('<base'), 'nothing injected when served at the root');
+  });
+
+  check('a sub-path with markup in it is refused, not echoed', async () => {
+    const res = await request('GET', '/', undefined, {
+      'X-Forwarded-Prefix': '/x"><script>alert(1)</script>',
+    });
+    assert.strictEqual(res.status, 200);
+    assert.ok(!res.body.includes('<base'), 'rejected rather than injected');
+    assert.ok(!res.body.includes('alert(1)'), 'and never echoed into the page');
+  });
+
+  check('index.html is not cached but the assets are', async () => {
+    const page = await request('GET', '/');
+    assert.strictEqual(page.headers['cache-control'], 'no-cache');
+    const asset = await request('GET', '/js/engine.js');
+    assert.ok(/max-age=/.test(asset.headers['cache-control']), asset.headers['cache-control']);
+  });
+
+  check('the favicon is served as SVG', async () => {
+    const res = await request('GET', '/favicon.svg');
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.headers['content-type'], 'image/svg+xml');
   });
 
   check('responses carry the basic hardening headers', async () => {

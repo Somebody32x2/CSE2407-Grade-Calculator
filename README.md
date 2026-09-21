@@ -19,7 +19,7 @@ No build step, no dependencies.
 
 ```sh
 npm start        # http://localhost:8080
-npm test         # 134 tests
+npm test         # 139 tests
 ```
 
 `npm start` runs the small Node server in `server/`, which serves the page and
@@ -210,16 +210,26 @@ On Coolify: new application, Docker (Dockerfile), build context `/`, port
 
 ### Serving it under a sub-path
 
-To host it at `example.com/CSE2407` rather than its own domain, set
-`BASE_PATH=CSE2407`. The server then strips that prefix and redirects the bare
-`/CSE2407` to `/CSE2407/` so the relative asset URLs resolve. If your reverse
-proxy already strips the prefix, leave `BASE_PATH` unset — and setting it when
-the proxy also strips is harmless, since the prefix is only removed when it is
-actually present.
+To host it at `example.com/CSE2407` rather than on its own domain, either
+arrangement works:
 
-The page itself needs no configuration: it works out where it is served from by
-looking at its own script URL, which is also what gets baked into each user's
-bookmarklet.
+- **The proxy strips the prefix** (Coolify and Traefik do this for a
+  path-based domain). Leave `BASE_PATH` unset. The proxy reports the prefix in
+  `X-Forwarded-Prefix`, and the server puts a matching `<base>` into the page.
+- **Nothing strips it.** Set `BASE_PATH=CSE2407`. The server removes the prefix
+  itself and redirects the bare `/CSE2407` to `/CSE2407/`.
+
+Setting `BASE_PATH` when the proxy also strips is harmless — the prefix is only
+removed when it is actually present.
+
+The `<base>` matters: without it, visiting `/CSE2407` with no trailing slash
+makes the browser resolve `js/app.js` against the domain root and every asset
+404s. `X-Forwarded-Prefix` is sanitised before it reaches the page, so a
+crafted header cannot inject markup.
+
+The page needs no configuration of its own: it works out where it is served
+from by looking at its own script URL, which is also what gets baked into each
+user's bookmarklet.
 
 **Serve it over HTTPS.** Canvas and Gradescope are HTTPS, and a browser blocks a
 `fetch` from those pages to an `http://` origin as mixed content — without TLS
