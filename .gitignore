@@ -1,0 +1,6 @@
+node_modules/
+*.log
+
+# Course material and saved pages used to tune the scrapers. Keeps real grade
+# data, personal details and copyright course documents out of the repository.
+reference/

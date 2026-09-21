@@ -1,0 +1,18 @@
+# For Coolify: point it at this repo and it will pick up the Dockerfile.
+# This compose file is for running the same image locally.
+services:
+  calculator:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      # How long a scraped payload waits in the relay before it is dropped.
+      SYNC_TTL_MS: "900000"
+      SYNC_MAX_BODY: "131072"
+      SYNC_RATE_LIMIT: "60"
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

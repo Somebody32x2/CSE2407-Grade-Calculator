@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CSE 2407 Grade Calculator</title>
+<meta name="description" content="Track CSE 2407 learning goal ratings and see the letter grade they add up to.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css?v=15">
+<script>
+  // Set the theme before first paint so the page never flashes the wrong one.
+  (function () {
+    try {
+      var saved = localStorage.getItem('cse2407.theme');
+      if (saved) document.documentElement.dataset.theme = saved;
+    } catch (e) { /* private browsing */ }
+  })();
+</script>
+</head>
+<body>
+
+<a class="skip-link" href="#goals">Skip to learning goals</a>
+
+<header class="topbar">
+  <div class="topbar__inner">
+    <div class="topbar__id">
+      <h1>CSE&nbsp;2407 Grade Calculator</h1>
+      <p class="topbar__sub">Unofficial. Your instructors have the real numbers.</p>
+    </div>
+    <div class="topbar__tools">
+      <button type="button" id="theme-btn" class="icon-btn" aria-live="polite">
+        <span class="icon-btn__glyph" aria-hidden="true"></span>
+        <span class="icon-btn__text">Theme</span>
+      </button>
+      <button type="button" id="export-btn" class="icon-btn">Save to file</button>
+      <button type="button" id="import-btn" class="icon-btn">Open file</button>
+      <button type="button" id="reset-btn" class="icon-btn icon-btn--quiet">Clear all</button>
+      <input type="file" id="file-input" accept=".json,application/json" hidden>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <!-- ============ The 30-point bar ============ -->
+  <section class="ladder-section" aria-labelledby="ladder-h">
+    <div class="ladder-head">
+      <div class="verdict">
+        <span class="verdict__grade" id="grade-letter">&mdash;</span>
+        <span class="verdict__points">
+          <output id="total-points" class="verdict__num">0</output><span class="verdict__den">/&thinsp;<span id="max-points">30</span> points</span>
+        </span>
+      </div>
+      <div class="ladder-head__note">
+        <h2 id="ladder-h">Where your points stand</h2>
+        <p id="next-rung" class="next-rung">Rate an assessment to start.</p>
+      </div>
+    </div>
+
+    <div class="ladder" id="ladder" role="img" aria-labelledby="ladder-h" aria-describedby="ladder-alt"></div>
+    <p id="ladder-alt" class="visually-hidden"></p>
+
+    <div class="ladder-key">
+      <span class="ladder-key__item"><i class="swatch swatch--p"></i>Goal at P</span>
+      <span class="ladder-key__item"><i class="swatch swatch--d"></i>Goal at D</span>
+      <span class="ladder-key__item"><i class="swatch swatch--s"></i>Goal at S</span>
+      <span class="ladder-key__item"><i class="swatch swatch--exam"></i>Exam points</span>
+      <span class="ladder-key__item"><i class="swatch swatch--bonus"></i>Special Topics</span>
+      <span class="ladder-key__item"><i class="swatch swatch--open"></i>Still open</span>
+      <span class="ladder-key__item"><i class="swatch swatch--locked"></i>Grade struck out below: needs LG&nbsp;0&nbsp;=&nbsp;P</span>
+    </div>
+
+    <dl class="tallies">
+      <div class="tally"><dt>Learning goals</dt><dd><output id="lg-points">0</output><span>/ 18</span></dd></div>
+      <div class="tally"><dt>Exams</dt><dd><output id="exam-points">0</output><span>/ 12</span></dd></div>
+      <div class="tally"><dt>Graded so far</dt><dd><output id="graded-count">0</output><span>/ <span id="gradable-count">0</span></span></dd></div>
+      <div class="tally tally--wide"><dt>LG 0 gate</dt><dd><span id="gate-state" class="gate">Not graded</span></dd></div>
+    </dl>
+
+    <details class="breakdown">
+      <summary>Read the bar as a table</summary>
+      <table class="breakdown__table">
+        <thead><tr><th scope="col">Source</th><th scope="col">Rating</th><th scope="col">Points</th><th scope="col">Of</th></tr></thead>
+        <tbody id="breakdown-body"></tbody>
+        <tfoot><tr><th scope="row">Total</th><td></td><td id="breakdown-total">0</td><td id="breakdown-max">30</td></tr></tfoot>
+      </table>
+    </details>
+  </section>
+
+  <!-- ============ What is holding the grade back ============ -->
+  <section class="blockers" aria-labelledby="blockers-h">
+    <h2 id="blockers-h">What is holding the grade back</h2>
+    <ul id="blockers-list" class="blockers__list"></ul>
+  </section>
+
+  <!-- ============ Entry ============ -->
+  <section id="goals" class="goals-section" aria-labelledby="goals-h">
+    <div class="goals-head">
+      <div>
+        <h2 id="goals-h">Your grades</h2>
+        <p class="goals-head__hint">Everything starts at S. Raise each one as grades come back, so the total only ever climbs.</p>
+      </div>
+      <div class="goals-head__controls">
+        <label class="field">
+          <span class="field__label">Find an assessment</span>
+          <input type="search" id="filter-input" placeholder="hash table, exam, zyBooks&hellip;" autocomplete="off">
+        </label>
+        <div class="toggle-row">
+          <button type="button" id="expand-btn" class="text-btn">Expand all</button>
+          <button type="button" id="collapse-btn" class="text-btn">Collapse all</button>
+        </div>
+        <label class="checkline">
+          <input type="checkbox" id="hide-spent">
+          Hide what can&rsquo;t change the grade
+        </label>
+      </div>
+    </div>
+    <p id="spent-note" class="spent-note"></p>
+    <div id="goal-list" class="goal-list"></div>
+  </section>
+
+  <!-- ============ Import from Canvas / Gradescope ============ -->
+  <section class="sync-section" aria-labelledby="sync-h">
+    <h2 id="sync-h">Import your grades</h2>
+    <p class="sync-intro">Drag the button below to your bookmarks bar, then click it while you are
+      on your <b>Canvas grades page</b> or your <b>Gradescope course page</b>. It reads the grade
+      table and sends it here. This tab picks it up within a few seconds.</p>
+    <p class="sync-intro">Run it on both. They cover different ground and Gradescope often marks
+      first, so each import is merged into what you already have rather than replacing it. A real
+      mark is never overwritten by a page that has simply not seen it yet, and anything you set by
+      hand stays put.</p>
+
+    <div class="sync-row">
+      <a class="bookmarklet" id="bookmarklet-link" href="#" draggable="true">CSE&nbsp;2407 grab grades</a>
+      <div class="sync-row__actions">
+        <button type="button" id="sync-check-btn" class="icon-btn">Check for data now</button>
+        <button type="button" id="sync-rotate-btn" class="icon-btn icon-btn--quiet">New sync link</button>
+      </div>
+    </div>
+
+    <p id="sync-status" class="sync-status">No grades imported yet.</p>
+    <p id="sync-official" class="sync-official"></p>
+    <div id="sync-unmatched"></div>
+
+    <details class="sync-privacy">
+      <summary>What gets sent</summary>
+      <ul>
+        <li>Assignment names, Canvas assignment ids and scores from the page you run it on. Nothing else.</li>
+        <li>It never reads your cookies, your login session or any other tab.</li>
+        <li>The scrape waits on the server under a random link only your browser knows, is deleted
+          the moment this tab collects it, and expires after fifteen minutes regardless.</li>
+        <li>If your school blocks the upload, the bookmarklet instead opens this page with the data
+          in the URL fragment &mdash; which browsers never send to a server. That path is entirely
+          on your machine.</li>
+      </ul>
+    </details>
+  </section>
+
+  <!-- ============ Rules + audit ============ -->
+  <section class="rules-section" aria-labelledby="rules-h">
+    <h2 id="rules-h">How the grade is worked out</h2>
+
+    <div class="rules-grid">
+      <article class="rule">
+        <h3>Each grade is worth points</h3>
+        <table class="mini-table">
+          <tbody>
+            <tr><th scope="row"><b class="chip chip--p">P</b> Proficient</th><td>2</td></tr>
+            <tr><th scope="row"><b class="chip chip--d">D</b> Developing</th><td>1</td></tr>
+            <tr><th scope="row"><b class="chip chip--s">S</b> Starting</th><td>0</td></tr>
+            <tr><th scope="row"><b class="chip chip--p">A</b> Application exam</th><td>4</td></tr>
+            <tr><th scope="row"><b class="chip chip--d">B</b> Baseline exam</th><td>3</td></tr>
+            <tr><th scope="row"><b class="chip chip--s">T</b> Attempted exam</th><td>1</td></tr>
+          </tbody>
+        </table>
+        <p>zyBooks is entered out of 10: <b>9.0</b> and up is P, <b>7.0</b> to 8.9 is D, below <b>7.0</b> is S.</p>
+      </article>
+
+      <article class="rule">
+        <h3>Subgoals take the second-highest grade</h3>
+        <p>Sort the grades and read off the second one down. One bad grade among several does not sink a subgoal.</p>
+        <ul>
+          <li>One grade &rarr; that grade</li>
+          <li>Two or more &rarr; second-highest</li>
+        </ul>
+      </article>
+
+      <article class="rule">
+        <h3>Except LG&nbsp;0, which takes the second-lowest</h3>
+        <p>All four LG&nbsp;0 subgoals are read from the other end &mdash; the second grade
+          <em>up</em> from the bottom. Miss one studio and your Collaboration rating holds; miss two
+          and it moves. Professional skills have to hold up all semester, not just twice.</p>
+      </article>
+
+      <article class="rule">
+        <h3>Global assessments take the lowest grade</h3>
+        <p>A goal&rsquo;s global assessments are scored on their weakest result, except that an S is relaxed to a D. A goal with no global assessments counts as P.</p>
+      </article>
+
+      <article class="rule">
+        <h3>A learning goal is only as strong as its weakest part</h3>
+        <ul>
+          <li>Every subgoal and the global at P &rarr; the goal is <b class="chip chip--p">P</b></li>
+          <li>Any S anywhere &rarr; the goal is <b class="chip chip--s">S</b></li>
+          <li>Anything else &rarr; the goal is <b class="chip chip--d">D</b></li>
+        </ul>
+      </article>
+
+      <article class="rule rule--gate">
+        <h3>LG&nbsp;0 gates the A range</h3>
+        <p>28, 29 and 30 points earn A&#8209;, A and A+ <em>only</em> when LG&nbsp;0 (Professional Skills) is P. Otherwise the grade stops at B+, however many points you have.</p>
+      </article>
+
+      <article class="rule">
+        <h3>Special Topics adds up to 2</h3>
+        <p>A separate opportunity, rated P/D/S and added to your total rather than to any learning
+          goal, so a perfect record comes to 32. Anything at or above 30 is still an A+.</p>
+      </article>
+
+      <article class="rule">
+        <h3>Points become letters</h3>
+        <div class="ladder-legend" id="ladder-legend"></div>
+        <p>Anything below 20 points is an F. If you are taking the course Pass/No&nbsp;Pass, C&#8209;
+          (22 points) is the lowest passing grade.</p>
+      </article>
+    </div>
+
+  </section>
+
+</main>
+
+<footer class="pagefoot">
+  <p>CSE&nbsp;2407 &middot; Fall 2026 &middot; estimates only, not an official record</p>
+  <p id="save-state" class="pagefoot__state">Saved in this browser</p>
+</footer>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<!-- ?v= is bumped whenever these files change, so a browser holding an old
+     copy does not mix versions. -->
+<script src="js/data.js?v=15"></script>
+<script src="js/engine.js?v=15"></script>
+<script src="js/syllabus.js?v=15"></script>
+<script src="js/ingest.js?v=15"></script>
+<script src="js/leverage.js?v=15"></script>
+<script src="js/bookmarklet.js?v=15"></script>
+<script src="js/app.js?v=15"></script>
+</body>
+</html>

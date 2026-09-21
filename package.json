@@ -1,0 +1,15 @@
+{
+  "name": "cse2407-grade-calculator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Grade calculator for CSE 2407, implementing the Fall 2026 syllabus.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/server.js",
+    "test": "node tests/engine.test.js && node tests/leverage.test.js && node tests/sync.test.js",
+    "build:bookmarklet": "node tools/build-bookmarklet.js"
+  },
+  "dependencies": {}
+}
