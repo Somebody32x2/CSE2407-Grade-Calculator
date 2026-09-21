@@ -9,6 +9,23 @@
 (function () {
   'use strict';
 
+  /**
+   * Where this app is served from, sub-path included.
+   *
+   * Taken from this script's own URL rather than assumed to be the origin
+   * root, so the app works unchanged at https://example.com/ or at
+   * https://example.com/CSE2407/. The browser has already resolved that URL,
+   * which makes it the one source of truth that cannot be wrong.
+   */
+  var APP_BASE = (function () {
+    var scripts = document.getElementsByTagName('script');
+    for (var i = scripts.length - 1; i >= 0; i--) {
+      var src = scripts[i].src || '';
+      if (/\/js\/app\.js(\?|$)/.test(src)) return src.replace(/\/js\/app\.js.*$/, '');
+    }
+    return location.origin;
+  })();
+
   var STORAGE_KEY = 'cse2407.progress';
   var THEME_KEY = 'cse2407.theme';
   var TOKEN_KEY = 'cse2407.syncToken';
@@ -297,12 +314,16 @@
 
         var cell = el('div', 'slot__cell');
         if (filled) cell.style.setProperty('--fill', fillVar);
-        cell.title = segment.label + ': ' + segment.filled + ' of ' + segment.capacity + ' points'
-          + (RUNG_AT[point] ? ' · ' + RUNG_AT[point] + ' starts at ' + point : '');
+        cell.setAttribute('data-tip', segment.label + ': ' + segment.filled + ' of '
+          + segment.capacity + ' points'
+          + (RUNG_AT[point] ? ' · ' + RUNG_AT[point] + ' starts at ' + point : ''));
         node.appendChild(cell);
 
         var tick = el('div', 'slot__tick', RUNG_AT[point] || '');
-        if (locked && GATED_AT[point]) tick.title = RUNG_AT[point] + ' needs LG 0 = P';
+        if (locked && GATED_AT[point]) {
+          tick.setAttribute('data-tip', RUNG_AT[point] + ' needs LG 0 to be P. You can hold '
+            + point + ' points and still not have it.');
+        }
         node.appendChild(tick);
 
         host.appendChild(node);
@@ -506,7 +527,7 @@
       btn.dataset.rating = option.value === null ? '' : option.value;
       btn.setAttribute('aria-pressed', String(current === option.value));
       btn.setAttribute('aria-label', option.title);
-      btn.title = option.title;
+      btn.setAttribute('data-tip', option.title);
       btn.addEventListener('click', function () { onPick(option.value); });
       group.appendChild(btn);
     });
@@ -541,8 +562,8 @@
     if (lv.countsInSeveral) {
       var labels = lv.places.map(function (p) { return p.label; }).join(' and ');
       var f = el('span', 'flag flag--multi', 'counts in ' + labels);
-      f.title = 'One grade, counted in ' + lv.places.length + ' subgoals: '
-        + lv.places.map(function (p) { return p.label + ' is ' + p.rating; }).join(', ');
+      f.setAttribute('data-tip', 'One grade, counted in ' + lv.places.length + ' subgoals: '
+        + lv.places.map(function (p) { return p.label + ' is ' + p.rating; }).join(', ') + '.');
       flags.push(f);
     }
 
@@ -564,17 +585,22 @@
       if (elsewhere.length) {
         var pf = el('span', 'flag flag--also' + (anyOpen ? ' flag--also-open' : ''),
           'also ' + elsewhere.join(', '));
-        pf.title = 'The same work is graded separately elsewhere. ' + detail.join('. ') + '.';
+        pf.setAttribute('data-tip',
+          'The same work is graded separately elsewhere. ' + detail.join('. ') + '.');
         flags.push(pf);
       }
     }
 
     if (lv.status === 'no-gain') {
       var note = el('span', 'flag flag--spent', 'no gain');
-      note.title = lv.workCanHelp
+      note.setAttribute('data-tip', (lv.workCanHelp
         ? 'Every subgoal this counts in is already at P, so raising it here changes nothing '
-          + '\u2014 but the same work still counts elsewhere, see the \u201calso\u201d flag.'
-        : 'Every subgoal this counts in is already at P, so this can no longer change your grade.';
+          + '\u2014 but the same work still counts elsewhere, see the \u201calso\u201d flag. '
+        : 'Every subgoal this counts in is already at P, so this can no longer change your '
+          + 'grade. ')
+        + 'Do it anyway: the point of the work is the understanding it builds, and the later '
+        + 'material assumes you have it. A grade that has stopped moving is not the same as '
+        + 'work that has stopped mattering.');
       flags.push(note);
     }
 
@@ -592,7 +618,8 @@
     var from = state.provenance[assessment.id];
     if (from && from.source) {
       var tag = el('span', 'row__from', from.source);
-      tag.title = 'Imported from ' + from.source + ' ' + relativeTime(new Date(from.at).toISOString());
+      tag.setAttribute('data-tip',
+        'Imported from ' + from.source + ' ' + relativeTime(new Date(from.at).toISOString()) + '.');
       name.appendChild(tag);
     }
 
@@ -1002,7 +1029,7 @@
 
   /** Collect anything waiting in the relay. Quiet when there is nothing. */
   function pollSync(announce) {
-    return fetch('/api/sync/' + encodeURIComponent(syncToken()), { cache: 'no-store' })
+    return fetch(APP_BASE + '/api/sync/' + encodeURIComponent(syncToken()), { cache: 'no-store' })
       .then(function (res) {
         if (res.status === 404) {
           if (announce) toast('Nothing waiting. Run the bookmarklet on Canvas first.');
@@ -1055,7 +1082,7 @@
   function renderSync() {
     var token = syncToken();
     var link = $('#bookmarklet-link');
-    link.setAttribute('href', buildBookmarklet(location.origin, token));
+    link.setAttribute('href', buildBookmarklet(APP_BASE, token));
 
     // One line per source, because they are read at different times and cover
     // different ground: "last updated" is only meaningful per source.

@@ -28,6 +28,16 @@ const PORT = Number(process.env.PORT || 8080);
 const HOST = process.env.HOST || '0.0.0.0';
 const ROOT = path.resolve(__dirname, '..');
 
+/**
+ * Sub-path this app is served under, e.g. "/CSE2407". Leave unset when it has
+ * the origin to itself, or when the reverse proxy already strips the prefix.
+ *
+ * Setting it when the proxy also strips is harmless: the prefix is removed
+ * only if it is actually present, so both arrangements work.
+ */
+const BASE_PATH = ('/' + String(process.env.BASE_PATH || '').trim())
+  .replace(/\/+/g, '/').replace(/\/$/, '');
+
 const TTL_MS = Number(process.env.SYNC_TTL_MS || 15 * 60 * 1000);
 const MAX_BODY = Number(process.env.SYNC_MAX_BODY || 128 * 1024);
 const MAX_ENTRIES = Number(process.env.SYNC_MAX_ENTRIES || 5000);
@@ -37,15 +47,16 @@ const RATE_WINDOW_MS = 60 * 1000;
 
 const STATIC_FILES = new Set([
   '/index.html',
+  '/favicon.svg',
   '/css/styles.css',
   '/js/data.js',
   '/js/engine.js',
   '/js/syllabus.js',
   '/js/ingest.js',
   '/js/leverage.js',
+  '/js/tooltip.js',
   '/js/app.js',
   '/js/bookmarklet.js',
-  '/favicon.ico',
 ]);
 
 const MIME = {
@@ -53,7 +64,6 @@ const MIME = {
   '.css': 'text/css; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
-  '.ico': 'image/x-icon',
   '.svg': 'image/svg+xml',
   '.md': 'text/plain; charset=utf-8',
 };
@@ -270,6 +280,15 @@ const server = http.createServer((req, res) => {
     return sendJson(res, 400, { error: 'bad url' });
   }
 
+  if (BASE_PATH) {
+    // "/CSE2407" alone has to become "/CSE2407/", or the relative asset URLs
+    // in index.html resolve one directory too high.
+    if (pathname === BASE_PATH) {
+      return send(res, 308, '', { Location: BASE_PATH + '/' });
+    }
+    if (pathname.startsWith(BASE_PATH + '/')) pathname = pathname.slice(BASE_PATH.length);
+  }
+
   if (pathname === '/api/health') {
     return sendJson(res, 200, {
       ok: true,
@@ -294,7 +313,9 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  process.stdout.write(`cse2407 calculator listening on http://${HOST}:${PORT}\n`);
+  process.stdout.write(
+    `cse2407 calculator listening on http://${HOST}:${PORT}${BASE_PATH}/\n`,
+  );
 });
 
 for (const signal of ['SIGTERM', 'SIGINT']) {

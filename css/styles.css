@@ -730,6 +730,33 @@ main {
   font-size: .75rem; color: var(--ink-3);
 }
 
+/* ------------------------------------------------------------------- tip -- */
+
+/* One shared bubble, positioned by js/tooltip.js. Kept wide enough to hold a
+   sentence or two, because the text that matters here is explanatory. */
+.tip {
+  position: absolute; z-index: 40;
+  max-width: min(34ch, calc(100vw - 24px));
+  padding: .5rem .65rem;
+  background: var(--ink);
+  color: var(--bg);
+  border-radius: var(--radius-sm);
+  font-size: .8125rem; line-height: 1.4;
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity .12s ease, transform .12s ease;
+}
+.tip--on { opacity: 1; transform: translateY(0); }
+.tip--above { transform: translateY(2px); }
+.tip--above.tip--on { transform: translateY(0); }
+
+/* A hint that the element explains itself, without the cursor changing on
+   every flag and chip. */
+[data-tip] { cursor: help; }
+button[data-tip], a[data-tip], input[data-tip] { cursor: inherit; }
+
 .toast {
   position: fixed; left: 50%; bottom: 22px;
   transform: translate(-50%, 12px);

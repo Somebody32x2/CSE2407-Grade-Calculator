@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="CSE 2407 grade calculator">
+  <!-- Three stacked bars in the P / D / S colours: the grading scheme in
+       miniature, and still legible at 16 pixels. -->
+  <rect width="32" height="32" rx="7" fill="#14201b"/>
+  <rect x="6"  y="7"  width="20" height="5" rx="2.5" fill="#1fa87c"/>
+  <rect x="6"  y="14" width="14" height="5" rx="2.5" fill="#d99a1e"/>
+  <rect x="6"  y="21" width="8"  height="5" rx="2.5" fill="#e85c78"/>
+</svg>

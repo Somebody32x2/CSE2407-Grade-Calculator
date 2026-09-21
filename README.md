@@ -208,6 +208,19 @@ docker compose up --build      # http://localhost:8080
 On Coolify: new application, Docker (Dockerfile), build context `/`, port
 `8080`, health check `GET /api/health`.
 
+### Serving it under a sub-path
+
+To host it at `example.com/CSE2407` rather than its own domain, set
+`BASE_PATH=CSE2407`. The server then strips that prefix and redirects the bare
+`/CSE2407` to `/CSE2407/` so the relative asset URLs resolve. If your reverse
+proxy already strips the prefix, leave `BASE_PATH` unset — and setting it when
+the proxy also strips is harmless, since the prefix is only removed when it is
+actually present.
+
+The page itself needs no configuration: it works out where it is served from by
+looking at its own script URL, which is also what gets baked into each user's
+bookmarklet.
+
 **Serve it over HTTPS.** Canvas and Gradescope are HTTPS, and a browser blocks a
 `fetch` from those pages to an `http://` origin as mixed content — without TLS
 every import silently falls back to the URL-fragment path.
@@ -225,6 +238,7 @@ you ever need more; the interface is already just get/set/delete.
 | `SYNC_MAX_BODY` | `131072` | largest accepted payload |
 | `SYNC_MAX_ENTRIES` | `5000` | cap on payloads held at once |
 | `SYNC_MAX_BYTES` | `67108864` | total bytes the relay may hold |
+| `BASE_PATH` | *(unset)* | sub-path it is served under, e.g. `CSE2407` |
 | `SYNC_RATE_LIMIT` | `60` | requests per minute per IP |
 
 The static handler serves from a fixed allow-list rather than the filesystem, so
@@ -238,6 +252,7 @@ app's own origin can collect a payload.
 
 ```
 index.html              markup
+favicon.svg             three bars in the P / D / S colours
 css/styles.css          one stylesheet, theming via custom properties
 js/data.js              assessment structure and Canvas assignment ids
 js/syllabus.js          completes LG 0's subgoals per the syllabus
@@ -246,6 +261,7 @@ js/leverage.js          cross-references and what can still change the grade
 js/ingest.js            turns scraped rows into ratings, and merges sources
 js/scrape.js            the bookmarklet body (source)
 js/bookmarklet.js       generated from scrape.js; do not edit
+js/tooltip.js           the shared tooltip bubble
 js/app.js               rendering and interaction
 server/server.js        static host and import relay
 tools/                  build script for the bookmarklet
