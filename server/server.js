@@ -12,6 +12,8 @@
  * Handling of the token and payload:
  *   - Stored under sha256(token), so the store never holds a usable token.
  *   - Dropped after TTL_MS, or on first successful read, whichever is sooner.
+ *   - Bounded by both an entry count and a byte budget, so the memory the
+ *     relay can hold is fixed regardless of how large the payloads are.
  *   - Never logged. Request logging records method, path and status only.
  */
 
@@ -29,6 +31,7 @@ const ROOT = path.resolve(__dirname, '..');
 const TTL_MS = Number(process.env.SYNC_TTL_MS || 15 * 60 * 1000);
 const MAX_BODY = Number(process.env.SYNC_MAX_BODY || 128 * 1024);
 const MAX_ENTRIES = Number(process.env.SYNC_MAX_ENTRIES || 5000);
+const MAX_BYTES = Number(process.env.SYNC_MAX_BYTES || 64 * 1024 * 1024);
 const RATE_LIMIT = Number(process.env.SYNC_RATE_LIMIT || 60); // requests per window per IP
 const RATE_WINDOW_MS = 60 * 1000;
 
@@ -57,13 +60,30 @@ const MIME = {
 
 /* ------------------------------------------------------------- the drop --- */
 
-const drop = new Map(); // sha256(token) -> { payload, expires }
+const drop = new Map(); // sha256(token) -> { payload, bytes, expires }
+
+/**
+ * Running total of payload bytes held.
+ *
+ * Capping the number of entries is not enough on its own: 5000 entries of the
+ * 128 KB maximum is 625 MB, which would exhaust a small container even though
+ * a real scrape is about 10 KB. The byte budget is the cap that actually
+ * bounds memory; the entry count just bounds bookkeeping.
+ */
+let dropBytes = 0;
 
 const keyOf = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
 
+function forget(key) {
+  const entry = drop.get(key);
+  if (!entry) return;
+  dropBytes -= entry.bytes;
+  drop.delete(key);
+}
+
 function sweep() {
   const now = Date.now();
-  for (const [key, entry] of drop) if (entry.expires <= now) drop.delete(key);
+  for (const [key, entry] of drop) if (entry.expires <= now) forget(key);
 }
 setInterval(sweep, 60 * 1000).unref();
 
@@ -183,19 +203,24 @@ async function handleSync(req, res, token, method) {
       return sendJson(res, 400, { error: 'too many items' }, CORS_POST);
     }
 
-    if (drop.size >= MAX_ENTRIES) sweep();
-    if (drop.size >= MAX_ENTRIES) {
+    const kept = {
+      source: typeof payload.source === 'string' ? payload.source.slice(0, 40) : 'unknown',
+      capturedAt: typeof payload.capturedAt === 'string' ? payload.capturedAt.slice(0, 40) : null,
+      items: payload.items,
+    };
+    const bytes = Buffer.byteLength(JSON.stringify(kept));
+
+    // Replacing this token's own payload frees its bytes first, so re-syncing
+    // never counts twice.
+    forget(key);
+
+    if (drop.size >= MAX_ENTRIES || dropBytes + bytes > MAX_BYTES) sweep();
+    if (drop.size >= MAX_ENTRIES || dropBytes + bytes > MAX_BYTES) {
       return sendJson(res, 503, { error: 'relay full, try again shortly' }, CORS_POST);
     }
 
-    drop.set(key, {
-      payload: {
-        source: typeof payload.source === 'string' ? payload.source.slice(0, 40) : 'unknown',
-        capturedAt: typeof payload.capturedAt === 'string' ? payload.capturedAt.slice(0, 40) : null,
-        items: payload.items,
-      },
-      expires: Date.now() + TTL_MS,
-    });
+    drop.set(key, { payload: kept, bytes, expires: Date.now() + TTL_MS });
+    dropBytes += bytes;
 
     return sendJson(res, 204, {}, CORS_POST);
   }
@@ -203,10 +228,10 @@ async function handleSync(req, res, token, method) {
   if (method === 'GET') {
     const entry = drop.get(key);
     if (!entry || entry.expires <= Date.now()) {
-      drop.delete(key);
+      forget(key);
       return sendJson(res, 404, { error: 'nothing waiting' });
     }
-    drop.delete(key); // single read: the drop is emptied as it is collected
+    forget(key); // single read: the drop is emptied as it is collected
     return sendJson(res, 200, entry.payload);
   }
 
@@ -246,7 +271,12 @@ const server = http.createServer((req, res) => {
   }
 
   if (pathname === '/api/health') {
-    return sendJson(res, 200, { ok: true, pending: drop.size, uptime: Math.round(process.uptime()) });
+    return sendJson(res, 200, {
+      ok: true,
+      pending: drop.size,
+      pendingBytes: dropBytes,
+      uptime: Math.round(process.uptime()),
+    });
   }
 
   const sync = pathname.match(/^\/api\/sync\/([^/]+)$/);
@@ -270,6 +300,7 @@ server.listen(PORT, HOST, () => {
 for (const signal of ['SIGTERM', 'SIGINT']) {
   process.on(signal, () => {
     drop.clear();
+    dropBytes = 0;
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 5000).unref();
   });

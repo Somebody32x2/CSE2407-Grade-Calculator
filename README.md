@@ -191,6 +191,12 @@ An entry is deleted the moment your tab collects it and expires after fifteen
 minutes regardless. Nothing is written to disk and payloads are never logged.
 `SIGTERM` clears the store, so a redeploy drops anything in flight.
 
+A whole course's scrape is about 10 KB, and it is held only while it is in
+transit. The relay is bounded by a byte budget as well as an entry count, so
+the memory it can occupy is fixed no matter how large or how numerous the
+payloads are — past the budget it answers 503 and waits. `GET /api/health`
+reports `pending` and `pendingBytes` if you want to watch it.
+
 ## Deploying
 
 The Dockerfile is a Node runtime plus this repo — no build stage.
@@ -218,6 +224,7 @@ you ever need more; the interface is already just get/set/delete.
 | `SYNC_TTL_MS` | `900000` | how long a scrape waits to be collected |
 | `SYNC_MAX_BODY` | `131072` | largest accepted payload |
 | `SYNC_MAX_ENTRIES` | `5000` | cap on payloads held at once |
+| `SYNC_MAX_BYTES` | `67108864` | total bytes the relay may hold |
 | `SYNC_RATE_LIMIT` | `60` | requests per minute per IP |
 
 The static handler serves from a fixed allow-list rather than the filesystem, so

@@ -700,6 +700,37 @@ async function relayTests() {
       'only the app, same origin, may collect a payload');
   });
 
+  check('health reports how many bytes are held', async () => {
+    const before = JSON.parse((await request('GET', '/api/health')).body);
+    assert.strictEqual(typeof before.pendingBytes, 'number');
+
+    const token = 'bbbbbbbb-cccc-dddd-eeee-ffff00001111';
+    await request('POST', `/api/sync/${token}`,
+      JSON.stringify({ source: 'Canvas', items: [{ name: 'zyBooks LG 1', grade: 'P' }] }));
+    const during = JSON.parse((await request('GET', '/api/health')).body);
+    assert.ok(during.pendingBytes > before.pendingBytes, 'bytes go up when a payload lands');
+
+    await request('GET', `/api/sync/${token}`);
+    const after = JSON.parse((await request('GET', '/api/health')).body);
+    assert.strictEqual(after.pendingBytes, before.pendingBytes,
+      'collecting a payload frees its bytes again');
+  });
+
+  check('re-syncing the same token does not double-count its bytes', async () => {
+    const token = 'cccccccc-dddd-eeee-ffff-000011112222';
+    const body = JSON.stringify({ source: 'Canvas', items: [{ name: 'zyBooks LG 2', grade: 'P' }] });
+    const baseline = JSON.parse((await request('GET', '/api/health')).body).pendingBytes;
+
+    await request('POST', `/api/sync/${token}`, body);
+    const once = JSON.parse((await request('GET', '/api/health')).body).pendingBytes;
+    await request('POST', `/api/sync/${token}`, body);
+    const twice = JSON.parse((await request('GET', '/api/health')).body).pendingBytes;
+    assert.strictEqual(once, twice, 'the second post replaces the first');
+
+    await request('GET', `/api/sync/${token}`);
+    assert.strictEqual(JSON.parse((await request('GET', '/api/health')).body).pendingBytes, baseline);
+  });
+
   check('static files are served from an allow-list', async () => {
     assert.strictEqual((await request('GET', '/')).status, 200);
     assert.strictEqual((await request('GET', '/js/engine.js')).status, 200);
