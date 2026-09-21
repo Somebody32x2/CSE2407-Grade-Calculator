@@ -13,7 +13,7 @@ ENV NODE_ENV=production \
 WORKDIR /app
 
 # The app holds grade data in memory only, so it never needs to write anywhere.
-COPY --chown=node:node index.html ./
+COPY --chown=node:node index.html favicon.svg ./
 COPY --chown=node:node css ./css
 COPY --chown=node:node js ./js
 COPY --chown=node:node server ./server

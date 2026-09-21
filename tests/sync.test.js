@@ -609,6 +609,41 @@ test('the bookmarklet stays well under the browser URL cap', () => {
   assert.ok(url.length < 60000, `bookmarklet is ${url.length} bytes`);
 });
 
+// --- The deployed image ----------------------------------------------------
+
+test('every file the server serves is copied into the Docker image', () => {
+  const dockerfile = fs.readFileSync(path.join(root, 'Dockerfile'), 'utf8');
+  const serverSrc = fs.readFileSync(path.join(root, 'server/server.js'), 'utf8');
+
+  // What the image contains: the source arguments of each COPY line.
+  const copied = new Set();
+  dockerfile.split('\n').forEach((line) => {
+    const m = line.match(/^COPY\s+(?:--\S+\s+)*(.+)$/);
+    if (!m) return;
+    const parts = m[1].trim().split(/\s+/);
+    parts.slice(0, -1).forEach((src) => copied.add(src.replace(/^\.\//, '')));
+  });
+
+  // What the server will try to read: its static allow-list.
+  const block = serverSrc.slice(
+    serverSrc.indexOf('STATIC_FILES = new Set(['),
+    serverSrc.indexOf(']);', serverSrc.indexOf('STATIC_FILES = new Set([')),
+  );
+  const served = (block.match(/'\/[^']+'/g) || []).map((q) => q.slice(2, -1));
+  assert.ok(served.length >= 8, 'found the allow-list: ' + served.join(', '));
+
+  const missing = served.filter((rel) => {
+    const top = rel.split('/')[0];
+    return !copied.has(rel) && !copied.has(top);
+  });
+  assert.deepStrictEqual(missing, [],
+    'these are served but never COPYed, so they would 404 in the image');
+
+  // And they have to exist in the repo to be copied in the first place.
+  const absent = served.filter((rel) => !fs.existsSync(path.join(root, rel)));
+  assert.deepStrictEqual(absent, [], 'served but missing from the repository');
+});
+
 // --- The relay --------------------------------------------------------------
 
 const server = require(path.join(root, 'server/server.js'));

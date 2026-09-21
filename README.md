@@ -19,7 +19,7 @@ No build step, no dependencies.
 
 ```sh
 npm start        # http://localhost:8080
-npm test         # 139 tests
+npm test         # 140 tests
 ```
 
 `npm start` runs the small Node server in `server/`, which serves the page and
