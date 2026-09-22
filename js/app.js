@@ -131,6 +131,25 @@
 
   function plural(n, one, many) { return n === 1 ? one : (many || one + 's'); }
 
+  /**
+   * Keep a zyBooks box on the 0-10 scale without fighting the person typing.
+   *
+   * Half-finished entries are legal -- "", "9.", ".5" all have to survive a
+   * keystroke, or a decimal can never be typed at all. Only what can never
+   * become a valid score is refused: other characters, a second point, and
+   * anything over 10.
+   */
+  function cleanZyEntry(raw, previous) {
+    var text = String(raw == null ? '' : raw).replace(/[^0-9.]/g, '');
+    var parts = text.split('.');
+    if (parts.length > 2) text = parts[0] + '.' + parts.slice(1).join('');
+    if (text === '') return '';
+    if (text === '.') return '0.';
+    var n = Number(text);
+    if (!Number.isFinite(n) || n > 10) return previous;
+    return text;
+  }
+
   var toastTimer = null;
   function toast(message) {
     var node = $('#toast');
@@ -518,13 +537,17 @@
     return ids.some(function (id) { return byId[id] && matchesFilter(byId[id]); });
   }
 
-  function ratingControl(current, options, onPick) {
+  function ratingControl(current, options, onPick, keyPrefix) {
     var group = el('div', 'rating');
     group.setAttribute('role', 'group');
     options.forEach(function (option) {
       var btn = el('button', 'rating__btn', option.label);
       btn.type = 'button';
       btn.dataset.rating = option.value === null ? '' : option.value;
+      // Repaint rebuilds these, so they need a stable identity to be
+      // refocused afterwards; without it, tabbing then pressing a rating
+      // dumps the keyboard back at the top of the page.
+      if (keyPrefix) btn.dataset.focusKey = keyPrefix + ':' + (option.value || 'none');
       btn.setAttribute('aria-pressed', String(current === option.value));
       btn.setAttribute('aria-label', option.title);
       btn.setAttribute('data-tip', option.title);
@@ -541,11 +564,26 @@
   ];
 
   var EXAM_OPTIONS = [
-    { value: 'A', label: 'A', title: 'Advanced, 4 points' },
-    { value: 'B', label: 'B', title: 'Baseline, 3 points' },
-    { value: 'T', label: 'T', title: 'Attempted, 1 point' },
+    { value: 'A', label: 'A', title: 'Application, 4 points — satisfactory work on the '
+      + 'free-response question, roughly an A on it' },
+    { value: 'B', label: 'B', title: 'Baseline, 3 points — 80% on the multiple-choice questions' },
+    { value: 'T', label: 'T', title: 'Attempted, 1 point — a good-faith attempt that does not '
+      + 'reach baseline' },
     { value: null, label: '–', title: 'Not graded yet' },
   ];
+
+  /**
+   * Is this row finished with, for grade purposes?
+   *
+   * Only if the work behind it is finished with too. A writeup whose content
+   * subgoal is at P but whose typesetting mark is still open is not spent --
+   * greying it out or hiding it would tell the student to skip work they
+   * genuinely still owe.
+   */
+  function isSpent(lv) {
+    if (lv.status === 'at-p') return true;
+    return lv.status === 'no-gain' && !lv.workCanHelp;
+  }
 
   /**
    * Flags explaining a row's reach and whether it is spent.
@@ -591,8 +629,27 @@
       }
     }
 
-    if (lv.status === 'no-gain') {
-      var note = el('span', 'flag flag--spent', 'no gain');
+    if (lv.status === 'no-gain' && lv.axesLeft.length) {
+      // Not spent at all: the work is still owed, just on LG 0's axis rather
+      // than this one. Say which axis, because that is the actionable part.
+      var owed = lv.axesLeft.join(' and ');
+      var where = [];
+      lv.stillOwedTo.forEach(function (partner) {
+        partner.places.forEach(function (p) {
+          if (!p.atP && where.indexOf(p.label) < 0) where.push(p.label);
+        });
+      });
+      var ax = el('span', 'flag flag--axis', owed);
+      ax.setAttribute('data-tip',
+        'The content side of this is already at P, so the rating here cannot rise \u2014 but the '
+        + 'same work is marked again for ' + owed + ' in LG 0'
+        + (where.length ? ' (' + where.join(', ') + ', not yet at P)' : '')
+        + '. You still have to do it and hand it in to earn that grade.');
+      flags.push(ax);
+    } else if (lv.status === 'no-gain') {
+      // "here" matters: the same work is often still owed on another row, and
+      // a bare "no gain" reads as "skip this", which would be wrong.
+      var note = el('span', 'flag flag--spent', lv.workCanHelp ? 'no gain here' : 'no gain');
       note.setAttribute('data-tip', (lv.workCanHelp
         ? 'Every subgoal this counts in is already at P, so raising it here changes nothing '
           + '\u2014 but the same work still counts elsewhere, see the \u201calso\u201d flag. '
@@ -626,9 +683,10 @@
     var marks = (opts && opts.uncounted) ? { flags: [], leverage: null } : rowFlags(assessment);
     marks.flags.forEach(function (f) { name.appendChild(f); });
     if (marks.leverage) {
-      var spent = marks.leverage.status === 'no-gain' || marks.leverage.status === 'at-p';
-      if (hideSpent && spent) row.hidden = true;
-      if (marks.leverage.status === 'no-gain') row.classList.add('row--spent');
+      if (hideSpent && isSpent(marks.leverage)) row.hidden = true;
+      if (isSpent(marks.leverage) && marks.leverage.status === 'no-gain') {
+        row.classList.add('row--spent');
+      }
     }
 
     row.appendChild(name);
@@ -641,15 +699,27 @@
 
       var chip = el('b', chipClass(rating), rating || '–');
       var input = el('input', 'zy-input');
-      input.type = 'number';
-      input.min = '0';
-      input.max = '10';
-      input.step = '0.1';
+      /**
+       * Deliberately a text box, not type="number".
+       *
+       * A number input reports value === '' for anything half-typed, so the
+       * '.' in "9.5" read as "cleared", wiped the score and reset the rating
+       * mid-keystroke. Plain text plus inputmode gives the same phone keypad
+       * and lets a partial entry stay on screen while it is being typed.
+       */
+      input.type = 'text';
+      input.inputMode = 'decimal';
+      input.autocomplete = 'off';
+      input.maxLength = 5;
       input.placeholder = '/10';
       input.value = state.zyScores[assessment.id] || '';
+      input.dataset.focusKey = 'zy-' + assessment.id;
       input.setAttribute('aria-label', assessment.name + ', score out of 10');
       input.addEventListener('input', function () {
-        var value = input.value;
+        var value = cleanZyEntry(input.value, state.zyScores[assessment.id] || '');
+        // Put the cleaned text back only when it differs, so the caret stays
+        // where the user left it on every ordinary keystroke.
+        if (value !== input.value) input.value = value;
         if (value === '') {
           delete state.zyScores[assessment.id];
           state.ratings[assessment.id] = 'S';
@@ -659,6 +729,21 @@
         }
         markSetByHand(assessment.id);
         commit();
+      });
+      /**
+       * "9." is fine to type but not to keep.
+       *
+       * Saved rather than committed: a trailing point does not change the
+       * number, so nothing needs rescoring, and repainting from inside a blur
+       * would hand focus straight back to the box being left.
+       */
+      input.addEventListener('blur', function () {
+        var tidy = String(input.value).replace(/\.$/, '');
+        if (tidy === input.value) return;
+        input.value = tidy;
+        if (tidy === '') delete state.zyScores[assessment.id];
+        else state.zyScores[assessment.id] = tidy;
+        save();
       });
 
       wrap.appendChild(el('span', 'row__zy', '0–10'));
@@ -670,7 +755,7 @@
         state.ratings[assessment.id] = value;
         markSetByHand(assessment.id);
         commit();
-      }));
+      }, 'rate-' + assessment.id));
     }
 
     return row;
@@ -816,7 +901,7 @@
           state.exams[key] = value;
           markSetByHand(key);
           commit();
-        }));
+        }, key));
         rows.appendChild(row);
       });
       block.appendChild(rows);
@@ -867,7 +952,7 @@
         state.specialTopics = value;
         markSetByHand('specialTopics');
         commit();
-      }));
+      }, 'specialTopics'));
       rows.appendChild(row);
       SPECIAL_TOPICS.forEach(function (a) {
         var r = el('div', 'row');
@@ -885,14 +970,14 @@
   /** How many counted assessments can no longer move the grade. */
   function spentTally() {
     var spent = 0;
-    var stranded = 0;
+    var owed = 0;
     var ids = gradableIds();
     ids.forEach(function (id) {
       var lv = assessmentLeverage(id, RELATIONS, results, byId, state.ratings);
-      if (lv.status === 'no-gain' || lv.status === 'at-p') spent++;
-      if (lv.status === 'no-gain' && !lv.workCanHelp) stranded++;
+      if (isSpent(lv)) spent++;
+      if (lv.status === 'no-gain' && lv.axesLeft.length) owed++;
     });
-    return { spent: spent, stranded: stranded, total: ids.length };
+    return { spent: spent, owed: owed, total: ids.length };
   }
 
   function renderSpentNote() {
@@ -909,9 +994,10 @@
       ' can no longer raise your grade \u2014 either already at P, or every subgoal they '
       + 'count in is at P, and a subgoal cannot go higher.',
     );
-    if (tally.stranded) {
-      node.append(' ' + tally.stranded + ' of those ' + (tally.stranded === 1 ? 'is' : 'are')
-        + ' not needed anywhere else either.');
+    if (tally.owed) {
+      node.append(' ' + tally.owed + ' more ' + (tally.owed === 1 ? 'is' : 'are')
+        + ' counted out on content but still owed for typesetting or participation in LG 0, '
+        + 'so ' + (tally.owed === 1 ? 'it is' : 'they are') + ' left in the list.');
     }
   }
 
@@ -1227,7 +1313,23 @@
 
   /* ---------------------------------------------------------- repainting -- */
 
+  /**
+   * Repaint, putting the keyboard back where it was.
+   *
+   * Every edit rebuilds the list from scratch, which is what keeps the UI and
+   * the engine from drifting apart -- but it also destroys the element being
+   * typed into, so a score box lost focus after each digit and "9.5" could
+   * not be entered at all. Controls carry a stable data-focus-key, and the
+   * one that had focus is found again and restored, caret included.
+   */
   function repaint() {
+    var active = document.activeElement;
+    var key = (active && active.dataset) ? active.dataset.focusKey : null;
+    var caret = null;
+    if (key && typeof active.selectionStart === 'number') {
+      caret = [active.selectionStart, active.selectionEnd];
+    }
+
     score();
     renderSummary();
     renderLadder();
@@ -1236,6 +1338,14 @@
     renderBlockers();
     renderGoals();
     renderSync();
+
+    if (!key) return;
+    var again = document.querySelector('[data-focus-key="' + key + '"]');
+    if (!again || again === active) return;
+    again.focus({ preventScroll: true });
+    if (caret && typeof again.setSelectionRange === 'function') {
+      try { again.setSelectionRange(caret[0], caret[1]); } catch (err) { /* not text */ }
+    }
   }
 
   function commit() {

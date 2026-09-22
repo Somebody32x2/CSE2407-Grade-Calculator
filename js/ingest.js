@@ -191,13 +191,29 @@ function interpretGrade(row, context = {}) {
   if (outOf === null && context.isZyBooks) outOf = 10;
 
   /**
+   * The score to show in the zyBooks box, always on the 0-10 scale the app
+   * uses and the thresholds are written against.
+   *
+   * Canvas reports these out of 100, so storing the raw number put a 95 in a
+   * box labelled 0-10: rejected on reload for being out of range, and read as
+   * a P by the 9.0 threshold no matter what it really was -- 65/100 would
+   * have scored a P. Converting here keeps one scale everywhere, whichever
+   * source the mark came from.
+   */
+  const zyScore = (context.isZyBooks && outOf > 0)
+    ? Math.min(10, Math.max(0, Math.round((score / outOf) * 100) / 10))
+    : undefined;
+
+  /**
    * Out of 2 means the rating points themselves: P=2, D=1, S=0. This is the
    * common case on Canvas, and it must not go through the proportion rule --
    * 1 out of 2 is a Developing, not the 50% that would round down to S.
    */
   if (outOf === 2 || (outOf === null && Number.isInteger(score) && score >= 0 && score <= 2)) {
     const points = Math.max(0, Math.min(2, Math.round(score)));
-    return { rating: ['S', 'D', 'P'][points], basis: 'points', strength: STRENGTH.MARKED };
+    return {
+      rating: ['S', 'D', 'P'][points], basis: 'points', strength: STRENGTH.MARKED, zyScore,
+    };
   }
 
   if (outOf === null || outOf <= 0) {
@@ -207,10 +223,10 @@ function interpretGrade(row, context = {}) {
   const proportion = score / outOf;
   for (const t of PROPORTION_THRESHOLDS) {
     if (proportion >= t.min) {
-      return { rating: t.rating, basis: 'proportion', strength: STRENGTH.MARKED };
+      return { rating: t.rating, basis: 'proportion', strength: STRENGTH.MARKED, zyScore };
     }
   }
-  return { rating: 'S', basis: 'proportion', strength: STRENGTH.MARKED };
+  return { rating: 'S', basis: 'proportion', strength: STRENGTH.MARKED, zyScore };
 }
 
 /** True when a row is a resubmission slot rather than the original work. */
@@ -446,11 +462,10 @@ function ingest(data, payload, current = {}) {
     offer(hit.assessment.id, hit.assessment.name, verdict, hit.by, () => {
       ratings[hit.assessment.id] = verdict.rating;
       if (isZyBooks) {
-        const score = toNumber(row.score);
-        const parsed = score === null ? parseScoreText(row.grade) : { score };
-        if (parsed && parsed.score !== null && parsed.score !== undefined) {
-          zyScores[hit.assessment.id] = String(parsed.score);
-        }
+        // Keep the box and the chip telling the same story: a zyBooks mark
+        // that arrived as a word rather than a number leaves no score behind.
+        if (verdict.zyScore === undefined) delete zyScores[hit.assessment.id];
+        else zyScores[hit.assessment.id] = String(verdict.zyScore);
       }
     });
   });

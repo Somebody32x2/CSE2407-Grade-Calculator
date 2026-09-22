@@ -180,6 +180,91 @@ test('"no gain" here still reports the work mattering elsewhere', () => {
   assert.strictEqual(check.workCanHelp, false, 'this one is genuinely spent');
 });
 
+// --- Still owed on LG 0's axis ---------------------------------------------
+
+/**
+ * Lift subgoal 3.1 to P without touching the writeup or the studio, so the
+ * question "can this row still help?" is answered by the subgoal being full
+ * rather than by the row's own rating.
+ */
+function maxed31() {
+  const ratings = allS();
+  ratings[idOf('MCQs: Searching and Sorting (LG 3.1, 3.2)')] = 'P';
+  ratings[idOf('Knowledge Check (LG 3.1)')] = 'P';
+  return ratings;
+}
+
+test('a writeup whose content is maxed is still owed for typesetting', () => {
+  const ratings = maxed31();
+  assert.strictEqual(score(ratings).goals['3'].subgoals['3.1'].rating, 'P');
+
+  const lv = leverage(idOf('Sorting Program Writeup (LG 3.1)'), ratings);
+  assert.strictEqual(lv.status, 'no-gain', 'the content rating cannot rise');
+  assert.deepStrictEqual(lv.axesLeft, ['typesetting'],
+    'but the writeup is still how the LG 0.3 typesetting mark is earned');
+  assert.strictEqual(lv.stillOwedTo.length, 1);
+  assert.strictEqual(lv.stillOwedTo[0].name, 'Sorting Program Writeup (LG 3.1) Typesetting');
+});
+
+test('a studio whose content is maxed is still owed for participation', () => {
+  // Week 7's studio is graded for one subgoal only, so once 4.3 is full the
+  // participation mark in LG 0.4 is the whole of what is left.
+  const ratings = allS();
+  ratings[idOf('MCQs: recurrences and master theorem (LG 4.3)')] = 'P';
+  ratings[idOf('Knowledge Check (LG 4.3)')] = 'P';
+
+  const lv = leverage(idOf('Week 7 Studio (LG 4.3)'), ratings);
+  assert.strictEqual(lv.status, 'no-gain');
+  assert.deepStrictEqual(lv.axesLeft, ['participation']);
+});
+
+test('a second content subgoal still open outranks the axis', () => {
+  // Week 4's studio is graded for 3.1 and 3.2 separately. With 3.1 full but
+  // 3.2 open, real content gain is still on the table, so the row must not
+  // be reduced to "participation".
+  const lv = leverage(idOf('Week 4 Studio (LG 3.1)'), maxed31());
+  assert.strictEqual(lv.status, 'no-gain', 'nothing more to win in 3.1 itself');
+  assert.strictEqual(lv.workCanHelp, true);
+  assert.deepStrictEqual(lv.axesLeft, [], 'Week 4 Studio (LG 3.2) is still open');
+});
+
+test('nothing is owed on an axis once that LG 0 subgoal is itself at P', () => {
+  const ratings = allS();
+  DATA.learningGoals['3'].subgoals['3.1'].assessments.forEach((i) => { ratings[i] = 'P'; });
+  DATA.learningGoals['0'].subgoals['0.3'].assessments.forEach((i) => { ratings[i] = 'P'; });
+  DATA.learningGoals['0'].subgoals['0.4'].assessments.forEach((i) => { ratings[i] = 'P'; });
+
+  const lv = leverage(idOf('Sorting Program Writeup (LG 3.1)'), ratings);
+  assert.strictEqual(lv.status, 'at-p', 'its own rating is P now');
+
+  // And a row still at S with everything around it maxed really is spent.
+  const check = leverage(idOf('Knowledge Check (LG 3.1)'), allS());
+  assert.deepStrictEqual(check.axesLeft, []);
+});
+
+test('an axis is only claimed when every open partner is one, and in LG 0', () => {
+  // The typesetting row seen from the other side: what is still open for it
+  // is the content mark in LG 3.1, which is not an LG 0 axis grade.
+  const ratings = allS();
+  DATA.learningGoals['0'].subgoals['0.3'].assessments.forEach((i) => { ratings[i] = 'P'; });
+
+  const lv = leverage(idOf('Sorting Program Writeup (LG 3.1) Typesetting'), ratings);
+  assert.strictEqual(lv.status, 'at-p');
+  assert.deepStrictEqual(lv.axesLeft, [], 'the content side is not an axis');
+});
+
+test('a genuinely spent row claims no axis', () => {
+  const ids = DATA.learningGoals['3'].subgoals['3.1'].assessments;
+  const ratings = allS();
+  ratings[ids[0]] = 'P';
+  ratings[ids[1]] = 'P';
+
+  const check = leverage(idOf('Knowledge Check (LG 3.1)'), ratings);
+  assert.strictEqual(check.status, 'no-gain');
+  assert.strictEqual(check.workCanHelp, false);
+  assert.deepStrictEqual(check.axesLeft, [], 'nothing anywhere still needs it');
+});
+
 test('an assessment feeding two subgoals still helps while either is below P', () => {
   const mcq = idOf('MCQs: Searching and Sorting (LG 3.1, 3.2)');
   const ratings = allS();

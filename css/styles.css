@@ -51,6 +51,11 @@
   --s-btn-ink:   #ffffff;
 
   --bonus:       #4a4fb8; /* indigo: blue is free in light, where the accent is green */
+
+  /* "Still owed for typesetting/participation" pill. A hue of its own: the
+     accent green already means "counts in" and P-soft means "still open". */
+  --axis-soft:   #e7e7f7;
+  --axis-ink:    #4a4fb8; /* 5.54:1 on --axis-soft */
   --slot-open:   #dde4e1;
   --lock-ink:    #97a4a0;
 
@@ -103,6 +108,9 @@
   --s-btn-ink:   #2a0b12;
 
   --bonus:       #c165b0; /* magenta: blue is taken by the dark accent */
+
+  --axis-soft:   #332030;
+  --axis-ink:    #d98fca; /* 6.28:1 on --axis-soft */
   --slot-open:   #242e3a;
   --lock-ink:    #5b6876;
 
@@ -144,6 +152,9 @@
     --s-btn-ink:   #2a0b12;
 
     --bonus:       #c165b0;
+
+    --axis-soft:   #332030;
+    --axis-ink:    #d98fca;
     --slot-open:   #242e3a;
     --lock-ink:    #5b6876;
 
@@ -678,6 +689,8 @@ main {
 /* The same work still counts somewhere that is not yet at P. */
 .flag--also-open { background: var(--p-soft); color: var(--p-ink); box-shadow: none; }
 .flag--spent { background: var(--d-soft); color: var(--d-ink); }
+/* Content is maxed, but the work is still owed on an LG 0 axis. */
+.flag--axis { background: var(--axis-soft); color: var(--axis-ink); }
 
 .row--spent .row__name { color: var(--ink-3); }
 

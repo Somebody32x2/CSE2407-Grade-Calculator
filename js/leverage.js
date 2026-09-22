@@ -21,6 +21,18 @@
 /** Qualifiers that mark which axis a piece of work is being graded on. */
 const AXIS_WORDS = /\b(typesetting|participation)\b/g;
 
+/**
+ * Which axis a row grades, if it is one of the professional-skills ones.
+ *
+ * A writeup marked for typesetting and a studio marked for participation are
+ * the same work seen from LG 0's side. Naming that axis is what lets the UI
+ * say "you still owe this for typesetting" instead of "no gain".
+ */
+function axisOf(name) {
+  const hit = String(name).match(/\b(typesetting|participation)\b/i);
+  return hit ? hit[1].toLowerCase() : null;
+}
+
 /** Base names this generic are not evidence of anything on their own. */
 const MAX_LOOSE_GROUP = 4;
 
@@ -135,12 +147,17 @@ function assessmentLeverage(id, relations, results, byId, ratings) {
       const rating = ratingOf(place);
       return { label: place.label, goalKey: place.goalKey, rating, atP: rating === 'P' };
     });
+    const partnerName = byId[partnerId] ? byId[partnerId].name : String(partnerId);
     return {
       id: partnerId,
-      name: byId[partnerId] ? byId[partnerId].name : String(partnerId),
+      name: partnerName,
       rating: ratings[partnerId] || null,
       places: partnerPlaces,
       canHelp: (ratings[partnerId] !== 'P') && partnerPlaces.some((p) => !p.atP),
+      /** "typesetting" / "participation", when this row grades that axis. */
+      axis: axisOf(partnerName),
+      /** True when every place it counts is inside LG 0. */
+      inLg0: partnerPlaces.length > 0 && partnerPlaces.every((p) => p.goalKey === '0'),
     };
   });
 
@@ -153,6 +170,26 @@ function assessmentLeverage(id, relations, results, byId, ratings) {
   else if (somewhereBelowP) status = 'can-help';
   else status = 'no-gain';
 
+  /**
+   * When this row is spent but the work is not, is everything still riding on
+   * it an LG 0 axis grade?
+   *
+   * This is the writeup whose content subgoal is already at P but whose
+   * typesetting mark in LG 0.3 is not, and the studio whose content subgoal is
+   * at P but whose participation mark in LG 0.4 is not. Calling that "no gain"
+   * is simply wrong -- the work still has to be done and handed in to earn the
+   * typesetting or participation grade. Naming the axis says so in one word.
+   */
+  const helping = partners.filter((p) => p.canHelp);
+  const axisOnly = status === 'no-gain'
+    && helping.length > 0
+    && helping.every((p) => p.axis && p.inLg0);
+
+  const axes = [];
+  if (axisOnly) {
+    helping.forEach((p) => { if (axes.indexOf(p.axis) < 0) axes.push(p.axis); });
+  }
+
   return {
     places,
     partners,
@@ -162,9 +199,13 @@ function assessmentLeverage(id, relations, results, byId, ratings) {
     canHelp: status === 'can-help',
     /** The work still matters somewhere, even if this particular row does not. */
     workCanHelp: status === 'can-help' || partners.some((p) => p.canHelp),
+    /** The axes still owed, e.g. "typesetting", when only those are left. */
+    axesLeft: axes,
+    /** Partners the work is still owed to, for the explanation. */
+    stillOwedTo: helping,
   };
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { buildRelations, assessmentLeverage, workKey, baseWorkName };
+  module.exports = { buildRelations, assessmentLeverage, workKey, baseWorkName, axisOf };
 }

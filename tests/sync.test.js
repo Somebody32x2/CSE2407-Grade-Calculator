@@ -174,10 +174,72 @@ test('a whole Canvas-shaped scrape maps end to end', () => {
 
   assert.strictEqual(r.ratings[studio.id], 'P');
   assert.strictEqual(r.ratings[zy.id], 'P');
-  assert.strictEqual(r.zyScores[zy.id], '90.9090909090909');
+  // Canvas marks zyBooks out of 100; the box is 0-10, so it is converted.
+  assert.strictEqual(r.zyScores[zy.id], '9.1');
   assert.strictEqual(r.ratings[byName('Knowledge Check (LG 1.1)').id], undefined,
     'an ungraded row leaves the rating alone');
   assert.strictEqual(r.unmatched.length, 0);
+});
+
+test('a zyBooks score is stored on the 0-10 scale whatever the source used', () => {
+  const zy = byName('zyBooks LG 0');
+
+  // Canvas: out of 100.
+  const canvas = I.ingest(DATA, {
+    source: 'Canvas',
+    items: [{ canvasId: String(zy.canvasId), name: zy.name, score: '65', outOf: '100' }],
+  }, EMPTY);
+  assert.strictEqual(canvas.zyScores[zy.id], '6.5');
+  assert.strictEqual(canvas.ratings[zy.id], 'S', '65% is below the 70% Developing line');
+
+  // A page that gives no denominator at all: already out of 10.
+  const bare = I.ingest(DATA, {
+    source: 'Gradescope',
+    items: [{ canvasId: String(zy.canvasId), name: zy.name, score: '9.5' }],
+  }, EMPTY);
+  assert.strictEqual(bare.zyScores[zy.id], '9.5');
+
+  // And a fraction written into the grade cell.
+  const text = I.ingest(DATA, {
+    source: 'Canvas',
+    items: [{ canvasId: String(zy.canvasId), name: zy.name, grade: '17/20' }],
+  }, EMPTY);
+  assert.strictEqual(text.zyScores[zy.id], '8.5');
+});
+
+test('a stored zyBooks score never lands outside the box it is shown in', () => {
+  const zy = byName('zyBooks LG 0');
+  [['100', '100'], ['0', '100'], ['10', '10'], ['110', '100']].forEach(([score, outOf]) => {
+    const r = I.ingest(DATA, {
+      source: 'Canvas',
+      items: [{ canvasId: String(zy.canvasId), name: zy.name, score, outOf }],
+    }, EMPTY);
+    const n = Number(r.zyScores[zy.id]);
+    assert.ok(n >= 0 && n <= 10, score + '/' + outOf + ' gave ' + n);
+  });
+});
+
+test('a zyBooks row graded by word leaves no contradicting number behind', () => {
+  const zy = byName('zyBooks LG 0');
+  const first = I.ingest(DATA, {
+    source: 'Canvas',
+    items: [{ canvasId: String(zy.canvasId), name: zy.name, score: '95', outOf: '100' }],
+  }, EMPTY);
+  assert.strictEqual(first.zyScores[zy.id], '9.5');
+
+  // A later source reports it as a bare letter. Leaving 9.5 in the box beside
+  // an S chip would be a straight contradiction.
+  const second = I.ingest(DATA, {
+    source: 'Gradescope',
+    capturedAt: new Date(Date.now() + 1000).toISOString(),
+    items: [{ canvasId: String(zy.canvasId), name: zy.name, grade: 'S' }],
+  }, {
+    ratings: first.ratings,
+    zyScores: first.zyScores,
+    provenance: first.provenance,
+  });
+  assert.strictEqual(second.ratings[zy.id], 'S');
+  assert.strictEqual(second.zyScores[zy.id], undefined);
 });
 
 // --- Name normalisation and matching ---------------------------------------
