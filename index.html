@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="icon" href="favicon.svg?v=1" type="image/svg+xml">
-<link rel="stylesheet" href="css/styles.css?v=18">
+<link rel="stylesheet" href="css/styles.css?v=19">
 <script>
   // Set the theme before first paint so the page never flashes the wrong one.
   (function () {
@@ -101,7 +101,10 @@
     <div class="goals-head">
       <div>
         <h2 id="goals-h">Your grades</h2>
-        <p class="goals-head__hint">Everything starts at S. Raise each one as grades come back, so the total only ever climbs.</p>
+        <p class="goals-head__hint">Most things start at S and climb as grades come back.
+          LG&nbsp;0 is the exception: it is scored on the second&#8209;<em>lowest</em> of the
+          grades you actually have, so its rows start unmarked and stay out of the sum until
+          they are marked.</p>
       </div>
       <div class="goals-head__controls">
         <label class="field">
@@ -193,8 +196,13 @@
       <article class="rule">
         <h3>Except LG&nbsp;0, which takes the second-lowest</h3>
         <p>All four LG&nbsp;0 subgoals are read from the other end &mdash; the second grade
-          <em>up</em> from the bottom. Miss one studio and your Collaboration rating holds; miss two
-          and it moves. Professional skills have to hold up all semester, not just twice.</p>
+          <em>up</em> from the bottom, counting only the ones actually graded. Miss one studio and
+          your Collaboration rating holds; miss two and it moves. Professional skills have to hold
+          up all semester, not just twice.</p>
+        <p>Two things follow. An LG&nbsp;0 subgoal starts at P and can only be held or pulled
+          down, never lifted by one more good grade. And a row nobody has marked yet is left
+          unmarked rather than assumed S, because an assumed S here is a real grade dragging the
+          rating down.</p>
       </article>
 
       <article class="rule">
@@ -258,13 +266,13 @@
 
 <!-- ?v= is bumped whenever these files change, so a browser holding an old
      copy does not mix versions. -->
-<script src="js/data.js?v=18"></script>
-<script src="js/engine.js?v=18"></script>
-<script src="js/syllabus.js?v=18"></script>
-<script src="js/ingest.js?v=18"></script>
-<script src="js/leverage.js?v=18"></script>
-<script src="js/bookmarklet.js?v=18"></script>
-<script src="js/tooltip.js?v=18"></script>
-<script src="js/app.js?v=18"></script>
+<script src="js/data.js?v=19"></script>
+<script src="js/engine.js?v=19"></script>
+<script src="js/syllabus.js?v=19"></script>
+<script src="js/ingest.js?v=19"></script>
+<script src="js/leverage.js?v=19"></script>
+<script src="js/bookmarklet.js?v=19"></script>
+<script src="js/tooltip.js?v=19"></script>
+<script src="js/app.js?v=19"></script>
 </body>
 </html>

@@ -42,6 +42,23 @@ function allS() {
   return r;
 }
 
+/** Ids LG 0 scores. LG 0 takes the second-lowest, so these are never seeded. */
+const LG0_IDS = new Set();
+Object.values(DATA.learningGoals['0'].subgoals || {})
+  .forEach((sg) => sg.assessments.forEach((i) => LG0_IDS.add(i)));
+(DATA.learningGoals['0'].global_assessments || []).forEach((i) => LG0_IDS.add(i));
+
+/**
+ * What the app actually starts from: S everywhere the second-highest rule
+ * applies, and nothing at all in LG 0, where an assumed S would drag the
+ * second-lowest down.
+ */
+function seeded() {
+  const r = {};
+  DATA.assessments.forEach((a) => { if (!LG0_IDS.has(a.id)) r[a.id] = 'S'; });
+  return r;
+}
+
 function leverage(id, ratings) {
   return L.assessmentLeverage(id, RELATIONS, score(ratings), byId, ratings);
 }
@@ -134,15 +151,33 @@ test('a partner must be graded somewhere this assessment is not', () => {
 
 // --- Whether it can still help ---------------------------------------------
 
-test('with everything at S, every counted assessment can help', () => {
-  const ratings = allS();
+test('from a fresh start nothing is written off', () => {
+  const ratings = seeded();
   const statuses = {};
   DATA.assessments.forEach((a) => {
     const st = leverage(a.id, ratings).status;
     statuses[st] = (statuses[st] || 0) + 1;
   });
-  assert.strictEqual(statuses['can-help'], 93);
+  // Everything the second-highest rule scores has headroom to be lifted.
+  assert.strictEqual(statuses['can-help'], 59);
+  // Everything LG 0 scores is unmarked, and the mark it gets can cost
+  // points, so it is pending rather than spent.
+  assert.strictEqual(statuses.pending, 34);
   assert.strictEqual(statuses.uncounted, 2, 'the two Special Topics rows');
+  assert.strictEqual(statuses['no-gain'], undefined, 'nothing is spent on day one');
+});
+
+test('an assumed S in LG 0 would have written the whole goal off', () => {
+  // The bug this seeding avoids: with every LG 0 row assumed S, the
+  // second-lowest of all-S is S, and no later grade can lift it.
+  const assumed = allS();
+  assert.strictEqual(score(assumed).goals['0'].rating, 'S');
+  assert.strictEqual(leverage(idOf('Week 1 Studio (LG 0.1)'), assumed).canHelp, false);
+
+  // Left unmarked, LG 0 starts clean and every row still counts.
+  const real = seeded();
+  assert.strictEqual(score(real).goals['0'].rating, 'P');
+  assert.strictEqual(leverage(idOf('Week 1 Studio (LG 0.1)'), real).status, 'pending');
 });
 
 test('an assessment already at P has nothing more to give', () => {
@@ -188,7 +223,7 @@ test('"no gain" here still reports the work mattering elsewhere', () => {
  * rather than by the row's own rating.
  */
 function maxed31() {
-  const ratings = allS();
+  const ratings = seeded();
   ratings[idOf('MCQs: Searching and Sorting (LG 3.1, 3.2)')] = 'P';
   ratings[idOf('Knowledge Check (LG 3.1)')] = 'P';
   return ratings;
@@ -209,7 +244,7 @@ test('a writeup whose content is maxed is still owed for typesetting', () => {
 test('a studio whose content is maxed is still owed for participation', () => {
   // Week 7's studio is graded for one subgoal only, so once 4.3 is full the
   // participation mark in LG 0.4 is the whole of what is left.
-  const ratings = allS();
+  const ratings = seeded();
   ratings[idOf('MCQs: recurrences and master theorem (LG 4.3)')] = 'P';
   ratings[idOf('Knowledge Check (LG 4.3)')] = 'P';
 
@@ -226,6 +261,54 @@ test('a second content subgoal still open outranks the axis', () => {
   assert.strictEqual(lv.status, 'no-gain', 'nothing more to win in 3.1 itself');
   assert.strictEqual(lv.workCanHelp, true);
   assert.deepStrictEqual(lv.axesLeft, [], 'Week 4 Studio (LG 3.2) is still open');
+});
+
+test('once 0.3 is settled at P the writeup really is no gain', () => {
+  // The whole point of second-lowest: a subgoal at P cannot be raised by a
+  // further grade, and with two clean marks banked a third bad one cannot
+  // pull it down either. So there is nothing left for this work to win.
+  const ratings = maxed31();
+  const ts = DATA.learningGoals['0'].subgoals['0.3'].assessments;
+  ratings[ts[0]] = 'P';
+  ratings[ts[1]] = 'P';
+  assert.strictEqual(score(ratings).goals['0'].subgoals['0.3'].rating, 'P');
+
+  const lv = leverage(idOf('Sorting Program Writeup (LG 3.1)'), ratings);
+  assert.strictEqual(lv.status, 'no-gain');
+  assert.deepStrictEqual(lv.axesLeft, [], 'truly no gain, so no typesetting pill');
+  assert.strictEqual(lv.workCanHelp, false);
+});
+
+test('one banked S in 0.3 spends the forgiveness, and the work counts again', () => {
+  const ratings = maxed31();
+  const ts = DATA.learningGoals['0'].subgoals['0.3'].assessments;
+  ratings[ts[0]] = 'P';
+  ratings[ts[1]] = 'P';
+  // A weak mark on some *other* typesetting row, leaving this writeup's own
+  // typesetting entry still unmarked.
+  ratings[idOf('Sorting Program Writeup (LG 3.2) Typesetting')] = 'S';
+  // Second-lowest still reads P: one weak mark is forgiven.
+  assert.strictEqual(score(ratings).goals['0'].subgoals['0.3'].rating, 'P');
+
+  // But a second weak mark would not be, so the next writeup matters again.
+  const lv = leverage(idOf('Sorting Program Writeup (LG 3.1)'), ratings);
+  assert.deepStrictEqual(lv.axesLeft, ['typesetting']);
+});
+
+test('a second-lowest subgoal is never raised by one more grade', () => {
+  const ts = DATA.learningGoals['0'].subgoals['0.3'].assessments;
+  [[], ['P'], ['P', 'P'], ['D', 'P'], ['D', 'D', 'P'], ['S', 'P', 'P']].forEach((marks) => {
+    const ratings = seeded();
+    marks.forEach((m, i) => { ratings[ts[i]] = m; });
+    const before = score(ratings).goals['0'].subgoals['0.3'].rating;
+
+    const after = Object.assign({}, ratings);
+    after[ts[marks.length]] = 'P';
+    const raised = score(after).goals['0'].subgoals['0.3'].rating;
+
+    assert.strictEqual(raised, before,
+      JSON.stringify(marks) + ' was ' + before + ', a further P made it ' + raised);
+  });
 });
 
 test('nothing is owed on an axis once that LG 0 subgoal is itself at P', () => {

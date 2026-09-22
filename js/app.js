@@ -100,6 +100,20 @@
     });
   }
 
+  /** Assessments scored by a goal that takes the second-lowest grade. */
+  var SECOND_LOWEST_IDS = (function () {
+    var set = new Set();
+    SECOND_LOWEST_GOALS.forEach(function (key) {
+      var goal = DATA.learningGoals[key];
+      if (!goal) return;
+      Object.values(goal.subgoals || {}).forEach(function (sg) {
+        sg.assessments.forEach(function (id) { set.add(id); });
+      });
+      (goal.global_assessments || []).forEach(function (id) { set.add(id); });
+    });
+    return set;
+  })();
+
   /** Assessments that can actually move the grade. */
   function gradableIds() {
     return Array.from(countedIds);
@@ -263,8 +277,23 @@
    * Exams stay blank because their lowest rating, T, is still worth a point:
    * "not sat yet" has to mean zero.
    */
+  /**
+   * Start every assessment at S, except the ones LG 0 scores.
+   *
+   * Assuming S elsewhere is safe because those subgoals take the
+   * second-highest grade: an ungraded row sits at the bottom of the pile and
+   * simply does not count, so the total only climbs as marks arrive.
+   *
+   * LG 0 takes the second-lowest, where the same assumption is ruinous and
+   * wrong. Every unmarked row would be an S dragging the subgoal down, so
+   * LG 0 would read S all semester and the A-range gate could never open
+   * until the very last studio was marked. The rule is second-lowest of the
+   * grades you actually have, so an unmarked row is left unmarked and the
+   * engine leaves it out.
+   */
   function seedRatings() {
     DATA.assessments.forEach(function (a) {
+      if (SECOND_LOWEST_IDS.has(a.id)) return;
       if (!isValidRating(state.ratings[a.id])) state.ratings[a.id] = 'S';
     });
     if (!isValidRating(state.specialTopics)) state.specialTopics = 'S';
@@ -403,8 +432,14 @@
     $('#gradable-count').textContent = String(gradableIds().length);
 
     var gate = $('#gate-state');
+    var lg0Graded = Object.values(results.goals['0'].subgoals)
+      .reduce(function (n, sg) { return n + sg.graded; }, 0);
     if (results.lg0Rating === 'P') {
-      gate.textContent = 'Open · A range available';
+      // P on no evidence is the syllabus rule, but saying so plainly stops it
+      // reading as an achievement already banked.
+      gate.textContent = lg0Graded
+        ? 'Open · A range available'
+        : 'Open · nothing marked against LG 0 yet';
       gate.className = 'gate gate--open';
     } else {
       gate.textContent = 'Closed · LG 0 is ' + results.lg0Rating + ', so B+ is the ceiling';
@@ -562,6 +597,18 @@
     { value: 'D', label: 'D', title: 'Developing, 1 point' },
     { value: 'S', label: 'S', title: 'Starting, 0 points' },
   ];
+
+  /**
+   * LG 0 rows can be put back to unmarked.
+   *
+   * Everywhere else an unmarked row is shown as S and clicking S undoes a
+   * mistake. LG 0 rows start genuinely unmarked, and an S there is not
+   * neutral -- it is a real grade that can pull the second-lowest down -- so
+   * there has to be a way back.
+   */
+  var PDS_CLEARABLE = PDS_OPTIONS.concat([
+    { value: null, label: '–', title: 'Not graded yet' },
+  ]);
 
   var EXAM_OPTIONS = [
     { value: 'A', label: 'A', title: 'Application, 4 points — satisfactory work on the '
@@ -751,11 +798,20 @@
       wrap.appendChild(chip);
       row.appendChild(wrap);
     } else {
-      row.appendChild(ratingControl(rating, PDS_OPTIONS, function (value) {
-        state.ratings[assessment.id] = value;
-        markSetByHand(assessment.id);
-        commit();
-      }, 'rate-' + assessment.id));
+      var clearable = SECOND_LOWEST_IDS.has(assessment.id);
+      row.appendChild(ratingControl(rating, clearable ? PDS_CLEARABLE : PDS_OPTIONS,
+        function (value) {
+          if (value === null) {
+            // Back to unmarked, and forget where it came from, so a later
+            // import can fill it in as if it had never been touched.
+            delete state.ratings[assessment.id];
+            delete state.provenance[assessment.id];
+          } else {
+            state.ratings[assessment.id] = value;
+            markSetByHand(assessment.id);
+          }
+          commit();
+        }, 'rate-' + assessment.id));
     }
 
     return row;

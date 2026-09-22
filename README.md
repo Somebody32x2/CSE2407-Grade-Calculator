@@ -19,7 +19,7 @@ No build step, no dependencies.
 
 ```sh
 npm start        # http://localhost:8080
-npm test         # 155 tests
+npm test         # 159 tests
 ```
 
 `npm start` runs the small Node server in `server/`, which serves the page and
@@ -47,9 +47,10 @@ Ratings aggregate upward:
 - **A subgoal** takes the *second-highest* rating among its assessments — so
   one bad grade among several does not sink it. A subgoal with a single grade
   takes that grade; one with none counts as P.
-- **Subgoals of LG 0** are the exception: they take the *second-lowest* rating.
-  Professional skills have to hold up across the semester, not just twice. Miss
-  one studio and your Collaboration rating holds; miss two and it moves.
+- **Subgoals of LG 0** are the exception: they take the *second-lowest* rating
+  among the assessments actually graded. Professional skills have to hold up
+  across the semester, not just twice. Miss one studio and your Collaboration
+  rating holds; miss two and it moves.
 - **A goal's global assessments** (its zyBooks reading) take the *lowest*
   rating, except that an S is relaxed to a D.
 - **A learning goal** is the highest level *every* subgoal and its global
@@ -60,9 +61,24 @@ Ratings aggregate upward:
 zyBooks is entered out of 10: 9.0 and up is P, 7.0 to 8.9 is D, below 7.0 is S.
 Canvas marks it out of 100, which is the same rule at 90% and 70%.
 
-Everything starts at **S**, so a fresh calculator reads 0 / 32 and an F. The
-total only climbs as real grades arrive, which is easier to read than a
-projection that drifts downward.
+Everything the second-highest rule scores starts at **S**, so the total only
+climbs as real grades arrive, which is easier to read than a projection that
+drifts downward. An unmarked row sits at the bottom of its pile and simply
+does not count.
+
+**LG 0 is seeded differently, and it has to be.** Under second-lowest an
+assumed S is not neutral — it is a grade dragging the subgoal down, and with
+every row assumed S the goal reads S all semester and the A-range gate can
+never open. So LG 0 rows start genuinely unmarked and the engine leaves them
+out, which is what "second-lowest of the grades you have" means. The
+consequence is worth knowing: an LG 0 subgoal starts at P and can only be held
+or pulled down. One more good grade never lifts it.
+
+That asymmetry drives the "can this still change my grade?" analysis too. For
+second-highest subgoals the question is headroom — is the subgoal below P, and
+could this grade contribute to lifting it. For second-lowest there is no
+headroom to speak of, so the app rescores the subgoal twice, once with the
+assessment at P and once at S, and reports what actually moves.
 
 ## Reading the bar
 

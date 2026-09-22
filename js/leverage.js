@@ -16,7 +16,29 @@
  * already at P cannot improve the grade however well it is done. Knowing that
  * -- and knowing when the *other* half of the same work still matters -- is
  * the difference between useful effort and wasted effort.
+ *
+ * "Can this still matter?" is answered by simulation rather than by reading
+ * the current rating, because the two aggregation rules behave in opposite
+ * directions. A second-highest subgoal is raised by a good grade; a
+ * second-lowest one (all of LG 0) can never be raised by an extra grade at
+ * all, only held or pulled down. Scoring the subgoal twice over -- once with
+ * this assessment at P, once at S -- answers both questions exactly, for
+ * either rule, with no special cases.
  */
+
+/**
+ * The engine's aggregation, however this file was loaded. In the browser
+ * engine.js is a plain script loaded first, so its functions are already in
+ * scope; under Node each test requires it directly.
+ */
+const RULES = (typeof module !== 'undefined' && module.exports)
+  ? require('./engine.js')
+  : {
+    subgoalRating: subgoalRating,
+    globalRating: globalRating,
+    RATING_POINTS: RATING_POINTS,
+    SECOND_LOWEST_GOALS: SECOND_LOWEST_GOALS,
+  };
 
 /** Qualifiers that mark which axis a piece of work is being graded on. */
 const AXIS_WORDS = /\b(typesetting|participation)\b/g;
@@ -69,13 +91,17 @@ function buildRelations(data, nameHelpers) {
   const add = (id, place) => { (places[id] = places[id] || []).push(place); };
 
   for (const [goalKey, goal] of Object.entries(data.learningGoals)) {
+    const secondLowest = RULES.SECOND_LOWEST_GOALS.indexOf(goalKey) >= 0;
     for (const [subgoalId, subgoal] of Object.entries(goal.subgoals || {})) {
       subgoal.assessments.forEach((id) => add(id, {
         kind: 'subgoal', goalKey, subgoalId, label: subgoalId, name: subgoal.name,
+        // Everything needed to rescore this subgoal under a what-if.
+        ids: subgoal.assessments, secondLowest,
       }));
     }
     (goal.global_assessments || []).forEach((id) => add(id, {
       kind: 'global', goalKey, subgoalId: null, label: 'LG ' + goalKey + ' global', name: 'Global assessments',
+      ids: goal.global_assessments, secondLowest,
     }));
   }
 
@@ -137,23 +163,82 @@ function assessmentLeverage(id, relations, results, byId, ratings) {
     return sub ? sub.rating : null;
   };
 
-  const places = (relations.places[id] || []).map((place) => {
+  /**
+   * Rescore one place with a single assessment forced to `whatIf`.
+   *
+   * Ungraded assessments are left out, exactly as the engine leaves them out,
+   * so "nothing graded yet" stays distinguishable from "everything graded S".
+   */
+  const rescore = (place, targetId, whatIf) => {
+    const list = (place.ids || [])
+      .map((each) => (each === targetId ? whatIf : ratings[each]))
+      .filter((r) => r === 'P' || r === 'D' || r === 'S');
+    return place.kind === 'global'
+      ? RULES.globalRating(list).rating
+      : RULES.subgoalRating(list, place.secondLowest).rating;
+  };
+
+  const points = (rating) => (rating in RULES.RATING_POINTS ? RULES.RATING_POINTS[rating] : -1);
+
+  /**
+   * What this assessment can still do to one place it counts in.
+   *
+   * The two rules need different questions asked of them.
+   *
+   * Second-highest: headroom is the question. A subgoal below P can still be
+   * lifted, and this assessment is one of the grades that would lift it --
+   * not necessarily on its own, since two good grades are needed to move a
+   * second-highest, but it counts towards them. Asking "does a P here raise
+   * it *this instant*" would call the first of the two pointless.
+   *
+   * Second-lowest: headroom is the wrong question, because there is none.
+   * Adding a grade to a second-lowest set can never raise it, only hold or
+   * lower it, so a simulation is the only honest answer. `canDrop` then
+   * carries the weight: an S here would cost something, which is precisely
+   * why the work still has to be done.
+   */
+  const inspect = (place, targetId) => {
     const rating = ratingOf(place);
-    return { label: place.label, goalKey: place.goalKey, rating, atP: rating === 'P' };
-  });
+    const now = rescore(place, null, null);
+    const raises = points(rescore(place, targetId, 'P')) > points(now);
+    return {
+      label: place.label,
+      goalKey: place.goalKey,
+      rating,
+      atP: rating === 'P',
+      canRaise: place.secondLowest ? raises : rating !== 'P',
+      canDrop: points(rescore(place, targetId, 'S')) < points(now),
+    };
+  };
+
+  const graded = (target) => ratings[target] === 'P' || ratings[target] === 'D'
+    || ratings[target] === 'S';
+
+  /** One row's standing: can it still win anything, or still lose anything? */
+  const standing = (target, targetPlaces) => {
+    if (!targetPlaces.length) return 'uncounted';
+    if (ratings[target] === 'P') return 'at-p';
+    if (targetPlaces.some((p) => p.canRaise)) return 'can-help';
+    // Not yet marked, and the mark it eventually gets could cost something.
+    if (!graded(target) && targetPlaces.some((p) => p.canDrop)) return 'pending';
+    return 'no-gain';
+  };
+
+  const places = (relations.places[id] || []).map((place) => inspect(place, id));
 
   const partners = (relations.partners[id] || []).map((partnerId) => {
-    const partnerPlaces = (relations.places[partnerId] || []).map((place) => {
-      const rating = ratingOf(place);
-      return { label: place.label, goalKey: place.goalKey, rating, atP: rating === 'P' };
-    });
+    const partnerPlaces = (relations.places[partnerId] || [])
+      .map((place) => inspect(place, partnerId));
     const partnerName = byId[partnerId] ? byId[partnerId].name : String(partnerId);
+    const partnerStatus = standing(partnerId, partnerPlaces);
     return {
       id: partnerId,
       name: partnerName,
       rating: ratings[partnerId] || null,
       places: partnerPlaces,
-      canHelp: (ratings[partnerId] !== 'P') && partnerPlaces.some((p) => !p.atP),
+      status: partnerStatus,
+      /** The work is still worth doing for this partner's sake. */
+      canHelp: partnerStatus === 'can-help' || partnerStatus === 'pending',
       /** "typesetting" / "participation", when this row grades that axis. */
       axis: axisOf(partnerName),
       /** True when every place it counts is inside LG 0. */
@@ -161,24 +246,21 @@ function assessmentLeverage(id, relations, results, byId, ratings) {
     };
   });
 
-  const own = ratings[id] || null;
-  const somewhereBelowP = places.some((p) => !p.atP);
-
-  let status;
-  if (!places.length) status = 'uncounted';
-  else if (own === 'P') status = 'at-p';
-  else if (somewhereBelowP) status = 'can-help';
-  else status = 'no-gain';
+  const status = standing(id, places);
 
   /**
-   * When this row is spent but the work is not, is everything still riding on
-   * it an LG 0 axis grade?
+   * When this row is finished with but the work is not, is everything still
+   * riding on it an LG 0 axis grade?
    *
-   * This is the writeup whose content subgoal is already at P but whose
-   * typesetting mark in LG 0.3 is not, and the studio whose content subgoal is
-   * at P but whose participation mark in LG 0.4 is not. Calling that "no gain"
-   * is simply wrong -- the work still has to be done and handed in to earn the
-   * typesetting or participation grade. Naming the axis says so in one word.
+   * This is the writeup whose content subgoal is full but whose typesetting
+   * mark in LG 0.3 is still to come, and the studio whose content is full but
+   * whose participation mark is still to come. Calling that "no gain" is
+   * wrong -- the work still has to be done and handed in to earn the LG 0
+   * grade. Naming the axis says so in one word.
+   *
+   * Once that LG 0 subgoal is itself settled at P nothing is owed: a
+   * second-lowest subgoal cannot be raised by a further grade, so there
+   * genuinely is no gain left, on either axis.
    */
   const helping = partners.filter((p) => p.canHelp);
   const axisOnly = status === 'no-gain'
@@ -195,10 +277,13 @@ function assessmentLeverage(id, relations, results, byId, ratings) {
     partners,
     countsInSeveral: places.length > 1,
     status,
-    /** Raising this assessment would move a subgoal that is not yet at P. */
+    /** Marking this higher would score one of its subgoals higher. */
     canHelp: status === 'can-help',
+    /** Not marked yet, and the mark it gets can still cost points. */
+    pending: status === 'pending',
     /** The work still matters somewhere, even if this particular row does not. */
-    workCanHelp: status === 'can-help' || partners.some((p) => p.canHelp),
+    workCanHelp: status === 'can-help' || status === 'pending'
+      || partners.some((p) => p.canHelp),
     /** The axes still owed, e.g. "typesetting", when only those are left. */
     axesLeft: axes,
     /** Partners the work is still owed to, for the explanation. */
