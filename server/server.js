@@ -5,13 +5,18 @@
  * POSTs a scraped payload under a token; the calculator tab GETs it once and
  * the server forgets it. Nothing touches disk.
  *
- *   POST /api/sync/:token   store a payload            (CORS open, token is the secret)
- *   GET  /api/sync/:token   take the payload and clear it (same origin)
+ *   POST /api/sync/:token   store a payload             (CORS open, token is the secret)
+ *   GET  /api/sync/:token   take everything waiting and clear it (same origin)
  *   GET  /api/health        liveness
+ *
+ * A token holds a short queue rather than one payload, so running the
+ * bookmarklet on Canvas and then on Gradescope without opening the calculator
+ * in between delivers both scrapes instead of only the second.
  *
  * Handling of the token and payload:
  *   - Stored under sha256(token), so the store never holds a usable token.
- *   - Dropped after TTL_MS, or on first successful read, whichever is sooner.
+ *   - Dropped TTL_MS after the last scrape, or on first successful read,
+ *     whichever is sooner.
  *   - Bounded by both an entry count and a byte budget, so the memory the
  *     relay can hold is fixed regardless of how large the payloads are.
  *   - Never logged. Request logging records method, path and status only.
@@ -70,15 +75,27 @@ const MIME = {
 
 /* ------------------------------------------------------------- the drop --- */
 
-const drop = new Map(); // sha256(token) -> { payload, bytes, expires }
+const drop = new Map(); // sha256(token) -> { payloads: [...], bytes, expires }
+
+/**
+ * How many scrapes one token may hold at once.
+ *
+ * Canvas and Gradescope cover different ground, so a student is told to run
+ * the bookmarklet on both -- and there is no reason they would open the
+ * calculator in between. A drop that held only the latest payload would throw
+ * the first scrape away, so each token keeps a short queue instead. A second
+ * run of the *same* page replaces its own earlier entry rather than stacking,
+ * which means the queue only grows with the number of distinct sources.
+ */
+const MAX_PAYLOADS = Number(process.env.SYNC_MAX_PAYLOADS || 4);
 
 /**
  * Running total of payload bytes held.
  *
- * Capping the number of entries is not enough on its own: 5000 entries of the
- * 128 KB maximum is 625 MB, which would exhaust a small container even though
- * a real scrape is about 10 KB. The byte budget is the cap that actually
- * bounds memory; the entry count just bounds bookkeeping.
+ * Capping the number of entries is not enough on its own: 5000 tokens each
+ * queueing the 128 KB maximum runs to gigabytes, even though a real scrape is
+ * about 10 KB. The byte budget is the cap that actually bounds memory; the
+ * entry count just bounds bookkeeping.
  */
 let dropBytes = 0;
 
@@ -218,19 +235,34 @@ async function handleSync(req, res, token, method) {
       capturedAt: typeof payload.capturedAt === 'string' ? payload.capturedAt.slice(0, 40) : null,
       items: payload.items,
     };
-    const bytes = Buffer.byteLength(JSON.stringify(kept));
 
-    // Replacing this token's own payload frees its bytes first, so re-syncing
-    // never counts twice.
-    forget(key);
+    // Clearing expired entries first means the budget is measured against
+    // what is really being held, and that anything still in `drop` is live.
+    sweep();
 
-    if (drop.size >= MAX_ENTRIES || dropBytes + bytes > MAX_BYTES) sweep();
-    if (drop.size >= MAX_ENTRIES || dropBytes + bytes > MAX_BYTES) {
+    // Anything already waiting under this token, minus whatever this scrape
+    // supersedes. Keeping arrival order lets the page merge oldest-first.
+    const existing = drop.get(key);
+    const waiting = existing ? existing.payloads.filter((p) => p.source !== kept.source) : [];
+    const payloads = waiting.concat([kept]).slice(-MAX_PAYLOADS);
+    const bytes = Buffer.byteLength(JSON.stringify(payloads));
+    const held = existing ? existing.bytes : 0;
+
+    // A re-sync replaces this token's bytes rather than adding to them, so its
+    // own share comes off the total before the budget is tested. Nothing is
+    // mutated until the test passes: a refusal has to leave a queue that was
+    // already waiting exactly where it was, or a third scrape arriving against
+    // a full relay would destroy the first two.
+    const entries = drop.size + (existing ? 0 : 1);
+    if (entries > MAX_ENTRIES || dropBytes - held + bytes > MAX_BYTES) {
       return sendJson(res, 503, { error: 'relay full, try again shortly' }, CORS_POST);
     }
 
-    drop.set(key, { payload: kept, bytes, expires: Date.now() + TTL_MS });
-    dropBytes += bytes;
+    // The clock restarts on every drop, so the fifteen minutes is fifteen
+    // minutes since the *last* scrape -- running the bookmarklet on a second
+    // site cannot leave the first one about to expire.
+    drop.set(key, { payloads, bytes, expires: Date.now() + TTL_MS });
+    dropBytes += bytes - held;
 
     return sendJson(res, 204, {}, CORS_POST);
   }
@@ -242,7 +274,13 @@ async function handleSync(req, res, token, method) {
       return sendJson(res, 404, { error: 'nothing waiting' });
     }
     forget(key); // single read: the drop is emptied as it is collected
-    return sendJson(res, 200, entry.payload);
+
+    // `payloads` is the real answer. The newest payload is also spread across
+    // the top level for the benefit of a tab that loaded an older copy of the
+    // page and expects one scrape: it gets the latest rather than nothing,
+    // which is exactly what it would have got before this became a queue.
+    const newest = entry.payloads[entry.payloads.length - 1];
+    return sendJson(res, 200, Object.assign({}, newest, { payloads: entry.payloads }));
   }
 
   return sendJson(res, 405, { error: 'method not allowed' });

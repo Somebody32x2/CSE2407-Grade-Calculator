@@ -19,7 +19,7 @@ No build step, no dependencies.
 
 ```sh
 npm start        # http://localhost:8080
-npm test         # 140 tests
+npm test         # 145 tests
 ```
 
 `npm start` runs the small Node server in `server/`, which serves the page and
@@ -183,12 +183,18 @@ cookie and no session. The server only ever holds a scrape in transit between
 your bookmarklet and your tab:
 
 ```
-sha256(token) -> { source, capturedAt, items[] }, with an expiry
+sha256(token) -> [{ source, capturedAt, items[] }, ...], with an expiry
 ```
 
+A token holds a short queue rather than one scrape, so running the bookmarklet
+on Canvas and then on Gradescope without opening the calculator in between
+delivers both. Re-running the same site replaces its own earlier entry instead
+of stacking up, so the queue only grows with the number of distinct sources.
+
 The token is hashed, so the store never holds a value that could be replayed.
-An entry is deleted the moment your tab collects it and expires after fifteen
-minutes regardless. Nothing is written to disk and payloads are never logged.
+An entry is deleted the moment your tab collects it and expires fifteen minutes
+after the last scrape regardless. Nothing is written to disk and payloads are
+never logged.
 `SIGTERM` clears the store, so a redeploy drops anything in flight.
 
 A whole course's scrape is about 10 KB, and it is held only while it is in
@@ -246,7 +252,8 @@ you ever need more; the interface is already just get/set/delete.
 | `HOST` | `0.0.0.0` | listen address |
 | `SYNC_TTL_MS` | `900000` | how long a scrape waits to be collected |
 | `SYNC_MAX_BODY` | `131072` | largest accepted payload |
-| `SYNC_MAX_ENTRIES` | `5000` | cap on payloads held at once |
+| `SYNC_MAX_ENTRIES` | `5000` | cap on tokens with a scrape waiting |
+| `SYNC_MAX_PAYLOADS` | `4` | scrapes one token may queue |
 | `SYNC_MAX_BYTES` | `67108864` | total bytes the relay may hold |
 | `BASE_PATH` | *(unset)* | sub-path it is served under, e.g. `CSE2407` |
 | `SYNC_RATE_LIMIT` | `60` | requests per minute per IP |

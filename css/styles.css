@@ -189,7 +189,7 @@ code {
 
 :where(a) { color: var(--accent); }
 
-:where(button, input, [tabindex]):focus-visible {
+:where(a, button, input, [tabindex]):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
@@ -729,6 +729,17 @@ main {
   display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
   font-size: .75rem; color: var(--ink-3);
 }
+
+/* Quiet until hovered: the footer is a signpost, not a call to action. */
+.pagefoot a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+}
+/* The darker accent, not --accent itself: the mark colour lands at 4.38:1 on
+   the page background in light mode, which is under AA for text. */
+.pagefoot a:hover { color: var(--accent-ink-soft); }
 
 /* ------------------------------------------------------------------- tip -- */
 

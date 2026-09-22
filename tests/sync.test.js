@@ -673,6 +673,49 @@ function request(method, urlPath, body, extraHeaders) {
 
 const TOKEN = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 
+/**
+ * A second server with different limits, as a child process.
+ *
+ * The module under test reads its configuration at require time and listens
+ * once, so testing a tight budget means a separate process rather than a
+ * second instance.
+ */
+function spawnServer(env) {
+  const port = 8400 + Math.floor(Math.random() * 400);
+  const child = require('child_process').spawn(
+    process.execPath, [path.join(root, 'server/server.js')],
+    { env: Object.assign({}, process.env, { PORT: String(port) }, env), stdio: 'ignore' },
+  );
+
+  const ask = (method, urlPath, body) => new Promise((resolve, reject) => {
+    const req = http.request(
+      { host: '127.0.0.1', port, path: urlPath, method, headers: { 'Content-Type': 'text/plain' } },
+      (res) => {
+        let data = '';
+        res.on('data', (c) => { data += c; });
+        res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: data }));
+      },
+    );
+    req.on('error', reject);
+    if (body !== undefined) req.write(body);
+    req.end();
+  });
+
+  const ready = (async () => {
+    for (let i = 0; i < 100; i++) {
+      try {
+        await ask('GET', '/api/health');
+        return;
+      } catch (err) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    }
+    throw new Error('the child server never came up');
+  })();
+
+  return { request: ask, ready, stop: () => child.kill() };
+}
+
 async function relayTests() {
   await new Promise((r) => {
     if (server.listening) return r();
@@ -770,6 +813,108 @@ async function relayTests() {
 
     await request('GET', `/api/sync/${token}`);
     assert.strictEqual(JSON.parse((await request('GET', '/api/health')).body).pendingBytes, baseline);
+  });
+
+  // Students are told to run the bookmarklet on Canvas and on Gradescope.
+  // Nothing makes them open the calculator in between, so the relay has to
+  // hold both scrapes rather than letting the second bury the first.
+  check('two sources dropped before a collection both survive', async () => {
+    const token = 'dddddddd-eeee-ffff-0000-111122223333';
+    await request('POST', `/api/sync/${token}`,
+      JSON.stringify({ source: 'Canvas', items: [{ name: 'zyBooks LG 1', grade: 'P' }] }));
+    await request('POST', `/api/sync/${token}`,
+      JSON.stringify({ source: 'Gradescope', items: [{ name: 'Hash Table Program', grade: 'D' }] }));
+
+    const get = await request('GET', `/api/sync/${token}`);
+    assert.strictEqual(get.status, 200);
+    const body = JSON.parse(get.body);
+    assert.deepStrictEqual(body.payloads.map((p) => p.source), ['Canvas', 'Gradescope'],
+      'both scrapes come back, in the order they arrived');
+    assert.strictEqual(body.payloads[0].items[0].name, 'zyBooks LG 1');
+    assert.strictEqual(body.payloads[1].items[0].name, 'Hash Table Program');
+
+    assert.strictEqual((await request('GET', `/api/sync/${token}`)).status, 404,
+      'collecting empties the whole queue, not just the front of it');
+  });
+
+  check('the newest scrape is also flat, for a tab running an older page', async () => {
+    const token = 'eeeeeeee-ffff-0000-1111-222233334444';
+    await request('POST', `/api/sync/${token}`,
+      JSON.stringify({ source: 'Canvas', items: [{ name: 'zyBooks LG 1', grade: 'P' }] }));
+    await request('POST', `/api/sync/${token}`,
+      JSON.stringify({ source: 'Gradescope', items: [{ name: 'Hash Table Program', grade: 'D' }] }));
+
+    const body = JSON.parse((await request('GET', `/api/sync/${token}`)).body);
+    assert.strictEqual(body.source, 'Gradescope');
+    assert.strictEqual(body.items[0].name, 'Hash Table Program',
+      'a page that only knows how to read one payload still gets the latest');
+  });
+
+  check('re-running one page replaces its own scrape, not the other one', async () => {
+    const token = 'ffffffff-0000-1111-2222-333344445555';
+    await request('POST', `/api/sync/${token}`,
+      JSON.stringify({ source: 'Canvas', items: [{ name: 'stale', grade: 'S' }] }));
+    await request('POST', `/api/sync/${token}`,
+      JSON.stringify({ source: 'Gradescope', items: [{ name: 'Hash Table Program', grade: 'D' }] }));
+    await request('POST', `/api/sync/${token}`,
+      JSON.stringify({ source: 'Canvas', items: [{ name: 'fresh', grade: 'P' }] }));
+
+    const body = JSON.parse((await request('GET', `/api/sync/${token}`)).body);
+    assert.deepStrictEqual(body.payloads.map((p) => p.source), ['Gradescope', 'Canvas'],
+      'a repeat scrape moves to the back rather than stacking up');
+    assert.strictEqual(body.payloads.length, 2);
+    assert.strictEqual(body.payloads[1].items[0].name, 'fresh');
+  });
+
+  check('a queue cannot grow past the payload cap', async () => {
+    const token = '00000000-1111-2222-3333-444455556666';
+    for (const source of ['one', 'two', 'three', 'four', 'five', 'six']) {
+      await request('POST', `/api/sync/${token}`,
+        JSON.stringify({ source, items: [{ name: 'zyBooks LG 1', grade: 'P' }] }));
+    }
+    const body = JSON.parse((await request('GET', `/api/sync/${token}`)).body);
+    assert.deepStrictEqual(body.payloads.map((p) => p.source), ['three', 'four', 'five', 'six'],
+      'the cap holds and it is the oldest that is dropped');
+  });
+
+  check('a queued second scrape adds bytes, and collecting frees them all', async () => {
+    const token = '11111111-2222-3333-4444-555566667777';
+    const baseline = JSON.parse((await request('GET', '/api/health')).body).pendingBytes;
+
+    await request('POST', `/api/sync/${token}`,
+      JSON.stringify({ source: 'Canvas', items: [{ name: 'zyBooks LG 1', grade: 'P' }] }));
+    const one = JSON.parse((await request('GET', '/api/health')).body).pendingBytes;
+    await request('POST', `/api/sync/${token}`,
+      JSON.stringify({ source: 'Gradescope', items: [{ name: 'Hash Table Program', grade: 'D' }] }));
+    const two = JSON.parse((await request('GET', '/api/health')).body).pendingBytes;
+    assert.ok(two > one, 'a queue of two is accounted for as two');
+
+    await request('GET', `/api/sync/${token}`);
+    assert.strictEqual(JSON.parse((await request('GET', '/api/health')).body).pendingBytes, baseline,
+      'the whole queue is freed on collection');
+  });
+
+  // A refusal must not be destructive. If a third scrape is turned away for
+  // want of budget, the two already queued still have to be collectable --
+  // otherwise a full relay silently eats grades a student already sent.
+  check('a refused scrape leaves the queue it could not join intact', async () => {
+    const tight = spawnServer({ SYNC_MAX_BYTES: '200' });
+    await tight.ready;
+    const token = '22222222-3333-4444-5555-666677778888';
+    const post = (source) => tight.request('POST', `/api/sync/${token}`,
+      JSON.stringify({ source, items: [{ name: 'zyBooks LG 1', grade: 'P' }] }));
+
+    try {
+      assert.strictEqual((await post('Canvas')).status, 204);
+      assert.strictEqual((await post('Gradescope')).status, 204);
+      assert.strictEqual((await post('zyBooks')).status, 503, 'the budget is enforced');
+
+      const body = JSON.parse((await tight.request('GET', `/api/sync/${token}`)).body);
+      assert.deepStrictEqual(body.payloads.map((p) => p.source), ['Canvas', 'Gradescope'],
+        'the two that were accepted survive the one that was refused');
+    } finally {
+      tight.stop();
+    }
   });
 
   check('static files are served from an allow-list', async () => {

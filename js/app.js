@@ -991,7 +991,7 @@
    * provenance map, so a Gradescope scrape cannot flatten a Canvas mark and a
    * replayed old payload cannot undo a newer one.
    */
-  function applyScrape(payload) {
+  function applyScrape(payload, quiet) {
     var result = ingest(DATA, payload, {
       ratings: state.ratings,
       zyScores: state.zyScores,
@@ -1020,11 +1020,55 @@
     };
 
     commit();
-    toast(result.matched.length
-      ? 'Merged ' + result.matched.length + ' ' + plural(result.matched.length, 'grade')
-        + ' from ' + source
-      : 'Nothing new from ' + source + ' — what you already have is newer');
+    if (!quiet) {
+      toast(result.matched.length
+        ? 'Merged ' + result.matched.length + ' ' + plural(result.matched.length, 'grade')
+          + ' from ' + source
+        : 'Nothing new from ' + source + ' — what you already have is newer');
+    }
     return result;
+  }
+
+  /** "Canvas", "Canvas and Gradescope", "Canvas, Gradescope and zyBooks". */
+  function listNames(names) {
+    if (names.length < 2) return names[0] || 'unknown';
+    return names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+  }
+
+  /**
+   * Merge a run of scrapes and report on them together.
+   *
+   * The relay hands over everything waiting at once, so two sources can arrive
+   * in a single collection. They are merged oldest-first and summarised in one
+   * message rather than a stack of toasts that overwrite each other.
+   */
+  function applyScrapes(payloads) {
+    if (payloads.length === 1) return applyScrape(payloads[0]);
+
+    var matched = 0;
+    var sources = [];
+    payloads.forEach(function (payload) {
+      var result = applyScrape(payload, true);
+      matched += result.matched.length;
+      var source = payload.source || 'unknown';
+      if (sources.indexOf(source) === -1) sources.push(source);
+    });
+
+    toast(matched
+      ? 'Merged ' + matched + ' ' + plural(matched, 'grade') + ' from ' + listNames(sources)
+      : 'Nothing new from ' + listNames(sources) + ' — what you already have is newer');
+  }
+
+  /**
+   * The scrapes in a relay response, oldest first.
+   *
+   * A response carries `payloads`; the newest scrape is also spread across the
+   * top level for older tabs. Reading the list when it is there and falling
+   * back to the flat shape keeps this tab working against either server.
+   */
+  function payloadsIn(body) {
+    var list = (body && Array.isArray(body.payloads)) ? body.payloads : [body];
+    return list.filter(function (p) { return p && Array.isArray(p.items); });
   }
 
   /** Collect anything waiting in the relay. Quiet when there is nothing. */
@@ -1038,7 +1082,12 @@
         if (!res.ok) throw new Error('HTTP ' + res.status);
         return res.json();
       })
-      .then(function (payload) { if (payload) applyScrape(payload); return payload; })
+      .then(function (body) {
+        var payloads = body ? payloadsIn(body) : [];
+        if (payloads.length) applyScrapes(payloads);
+        else if (announce && body) toast('That import held no grades.');
+        return body;
+      })
       .catch(function () {
         if (announce) toast('Could not reach the sync relay.');
         return null;
@@ -1050,18 +1099,19 @@
     var m = String(location.hash || '').match(/[#&]import=([^&]+)/);
     if (!m) return false;
     history.replaceState(null, '', location.pathname + location.search);
-    var payload;
+    var body;
     try {
-      payload = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(m[1])))));
+      body = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(m[1])))));
     } catch (err) {
       toast('That import link was not readable.');
       return false;
     }
-    if (!payload || !Array.isArray(payload.items)) {
+    var payloads = payloadsIn(body);
+    if (!payloads.length) {
       toast('That import link held no grades.');
       return false;
     }
-    applyScrape(payload);
+    applyScrapes(payloads);
     return true;
   }
 

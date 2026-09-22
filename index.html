@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="icon" href="favicon.svg?v=1" type="image/svg+xml">
-<link rel="stylesheet" href="css/styles.css?v=16">
+<link rel="stylesheet" href="css/styles.css?v=17">
 <script>
   // Set the theme before first paint so the page never flashes the wrong one.
   (function () {
@@ -131,7 +131,8 @@
     <p class="sync-intro">Run it on both. They cover different ground and Gradescope often marks
       first, so each import is merged into what you already have rather than replacing it. A real
       mark is never overwritten by a page that has simply not seen it yet, and anything you set by
-      hand stays put.</p>
+      hand stays put. You can run it on both sites back to back without coming here in
+      between &mdash; both scrapes wait for you and arrive together.</p>
 
     <div class="sync-row">
       <a class="bookmarklet" id="bookmarklet-link" href="#" draggable="true">CSE&nbsp;2407 grab grades</a>
@@ -150,8 +151,9 @@
       <ul>
         <li>Assignment names, Canvas assignment ids and scores from the page you run it on. Nothing else.</li>
         <li>It never reads your cookies, your login session or any other tab.</li>
-        <li>The scrape waits on the server under a random link only your browser knows, is deleted
-          the moment this tab collects it, and expires after fifteen minutes regardless.</li>
+        <li>Scrapes wait on the server under a random link only your browser knows, are deleted
+          the moment this tab collects them, and expire fifteen minutes after the last one
+          regardless.</li>
         <li>If your school blocks the upload, the bookmarklet instead opens this page with the data
           in the URL fragment &mdash; which browsers never send to a server. That path is entirely
           on your machine.</li>
@@ -233,7 +235,8 @@
 </main>
 
 <footer class="pagefoot">
-  <p>CSE&nbsp;2407 &middot; Fall 2026 &middot; estimates only, not an official record</p>
+  <p>CSE&nbsp;2407 &middot; Fall 2026 &middot; estimates only, not an official record &middot;
+    <a href="https://github.com/Somebody32x2/CSE2407-Grade-Calculator" target="_blank" rel="noopener">Source on GitHub</a></p>
   <p id="save-state" class="pagefoot__state">Saved in this browser</p>
 </footer>
 
@@ -241,13 +244,13 @@
 
 <!-- ?v= is bumped whenever these files change, so a browser holding an old
      copy does not mix versions. -->
-<script src="js/data.js?v=16"></script>
-<script src="js/engine.js?v=16"></script>
-<script src="js/syllabus.js?v=16"></script>
-<script src="js/ingest.js?v=16"></script>
-<script src="js/leverage.js?v=16"></script>
-<script src="js/bookmarklet.js?v=16"></script>
-<script src="js/tooltip.js?v=16"></script>
-<script src="js/app.js?v=16"></script>
+<script src="js/data.js?v=17"></script>
+<script src="js/engine.js?v=17"></script>
+<script src="js/syllabus.js?v=17"></script>
+<script src="js/ingest.js?v=17"></script>
+<script src="js/leverage.js?v=17"></script>
+<script src="js/bookmarklet.js?v=17"></script>
+<script src="js/tooltip.js?v=17"></script>
+<script src="js/app.js?v=17"></script>
 </body>
 </html>
