@@ -686,7 +686,7 @@
           if (!p.atP && where.indexOf(p.label) < 0) where.push(p.label);
         });
       });
-      var ax = el('span', 'flag flag--axis', owed);
+      var ax = el('span', 'flag flag--axis', 'only ' + owed);
       ax.setAttribute('data-tip',
         'The content side of this is already at P, so the rating here cannot rise \u2014 but the '
         + 'same work is marked again for ' + owed + ' in LG 0'
@@ -817,6 +817,41 @@
     return row;
   }
 
+  /**
+   * Plain-English note for a second-lowest subgoal.
+   *
+   * The rule is the least intuitive thing in the course and the one students
+   * most often read backwards: it is the second-lowest of the assessments
+   * that have actually been graded, not of all of them. That means a couple
+   * of clean marks hold the subgoal at P and the remaining dozen rows are not
+   * a dozen hurdles. It also means exactly one weak mark is forgiven, and
+   * knowing whether that forgiveness is still unspent is the actionable part.
+   */
+  function secondLowestNote(subgoal, scored) {
+    var weak = subgoal.assessments.filter(function (id) {
+      var r = state.ratings[id];
+      return r === 'D' || r === 'S';
+    }).length;
+
+    var rule = 'Only the graded ones count, and this takes the second-lowest of those — '
+      + 'one or two clean marks hold it at P, so you do not need all ' + scored.total + '.';
+
+    var state_;
+    if (scored.graded === 0) {
+      state_ = ' Nothing is marked yet, so it counts as P for now; the first mark sets it.';
+    } else if (weak === 0) {
+      state_ = ' All ' + scored.graded + ' marked so far ' + (scored.graded === 1 ? 'is' : 'are')
+        + ' at P, and one weak mark from here would still be forgiven.';
+    } else if (weak === 1) {
+      state_ = ' One mark is below P. That is the one this rule forgives, so a second would '
+        + 'pull the subgoal down.';
+    } else {
+      state_ = ' ' + weak + ' marks are below P, which is why it reads ' + scored.rating
+        + '. Only raising them changes it — a further good mark cannot.';
+    }
+    return rule + state_;
+  }
+
   function subgoalBlock(goalKey, subgoalId, subgoal, scored) {
     var block = el('div', 'subgoal');
 
@@ -830,6 +865,10 @@
     head.appendChild(el('span', 'subgoal__basis',
       scored.graded + ' of ' + scored.total + ' graded · ' + scored.basis));
     block.appendChild(head);
+
+    if (scored.useSecondLowest) {
+      block.appendChild(el('p', 'subgoal__note', secondLowestNote(subgoal, scored)));
+    }
 
     var rows = el('div', 'rows');
     subgoal.assessments.forEach(function (id) {

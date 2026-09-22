@@ -295,6 +295,26 @@ test('one banked S in 0.3 spends the forgiveness, and the work counts again', ()
   assert.deepStrictEqual(lv.axesLeft, ['typesetting']);
 });
 
+test('two graded marks only settle 0.3 if both are P', () => {
+  const ts = DATA.learningGoals['0'].subgoals['0.3'].assessments;
+  const writeup = idOf('Sorting Program Writeup (LG 3.1)');
+
+  // Two clean marks: the third can neither lift it nor drop it.
+  const clean = maxed31();
+  clean[ts[0]] = 'P';
+  clean[ts[1]] = 'P';
+  assert.strictEqual(score(clean).goals['0'].subgoals['0.3'].rating, 'P');
+  assert.deepStrictEqual(leverage(writeup, clean).axesLeft, []);
+
+  // One clean and one weak still reads P, but the forgiveness is spent, so
+  // a third weak mark would pull it to D and the work still counts.
+  const spent = maxed31();
+  spent[ts[0]] = 'P';
+  spent[ts[1]] = 'D';
+  assert.strictEqual(score(spent).goals['0'].subgoals['0.3'].rating, 'P');
+  assert.deepStrictEqual(leverage(writeup, spent).axesLeft, ['typesetting']);
+});
+
 test('a second-lowest subgoal is never raised by one more grade', () => {
   const ts = DATA.learningGoals['0'].subgoals['0.3'].assessments;
   [[], ['P'], ['P', 'P'], ['D', 'P'], ['D', 'D', 'P'], ['S', 'P', 'P']].forEach((marks) => {

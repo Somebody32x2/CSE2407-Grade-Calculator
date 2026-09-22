@@ -529,6 +529,15 @@ main {
   border-radius: 4px; padding: .1rem .4rem;
 }
 
+/* The second-lowest rule, spelled out under the subgoal it applies to. */
+.subgoal__note {
+  font-size: .75rem; color: var(--ink-2);
+  background: var(--surface-sunk);
+  border-left: 2px solid var(--d);
+  padding: 6px 10px; margin: 0 0 2px;
+  max-width: 78ch;
+}
+
 .rows { display: flex; flex-direction: column; }
 .row {
   display: grid;
